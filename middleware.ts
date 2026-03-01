@@ -1,4 +1,22 @@
-export { auth as middleware } from "@/lib/auth";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+
+export function middleware(request: NextRequest) {
+  // Check for the session token cookie (set by NextAuth)
+  const token = request.cookies.get("authjs.session-token") || request.cookies.get("__Secure-authjs.session-token");
+
+  if (!token) {
+    // For API routes, return 401
+    if (request.nextUrl.pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    // For pages, redirect to login
+    const loginUrl = new URL("/login", request.url);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  return NextResponse.next();
+}
 
 export const config = {
   matcher: [
@@ -7,11 +25,5 @@ export const config = {
     "/staff/:path*",
     "/settlements/:path*",
     "/settings/:path*",
-    "/api/dashboard/:path*",
-    "/api/inventory/:path*",
-    "/api/staff/:path*",
-    "/api/settlements/:path*",
-    "/api/users/:path*",
-    "/api/seed/:path*",
   ],
 };
