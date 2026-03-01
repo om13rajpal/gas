@@ -9,13 +9,20 @@ export async function GET() {
     return NextResponse.json({ error: "No bot token configured" }, { status: 500 });
   }
 
+  const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+
   // Set webhook
+  const webhookBody: Record<string, string> = { url: webhookUrl };
+  if (webhookSecret) {
+    webhookBody.secret_token = webhookSecret;
+  }
+
   const res = await fetch(
     `https://api.telegram.org/bot${token}/setWebhook`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: webhookUrl }),
+      body: JSON.stringify(webhookBody),
     }
   );
   const data = await res.json();

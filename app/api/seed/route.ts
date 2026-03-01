@@ -3,8 +3,12 @@ import bcryptjs from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
 import { Inventory } from "@/lib/models/Inventory";
+import { requireAdmin } from "@/lib/auth";
 
 export async function GET() {
+  const { error } = await requireAdmin();
+  if (error) return error;
+
   try {
     await connectDB();
 

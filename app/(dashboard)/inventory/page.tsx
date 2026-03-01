@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import { Package, Save, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +22,8 @@ interface InventoryItem {
 }
 
 export default function InventoryPage() {
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "admin";
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<string | null>(null);
@@ -123,7 +126,7 @@ export default function InventoryPage() {
               </CardHeader>
               <CardContent>
                 {editing === item._id ? (
-                  <div className="grid gap-3 sm:grid-cols-3">
+                  <div className={`grid gap-3 ${isAdmin ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
                     <div>
                       <Label className="text-xs">Full Stock</Label>
                       <Input
@@ -140,14 +143,16 @@ export default function InventoryPage() {
                         onChange={(e) => setEditValues({ ...editValues, emptyStock: parseInt(e.target.value) || 0 })}
                       />
                     </div>
-                    <div>
-                      <Label className="text-xs">Price per Unit</Label>
-                      <Input
-                        type="number"
-                        value={editValues.pricePerUnit ?? ""}
-                        onChange={(e) => setEditValues({ ...editValues, pricePerUnit: parseInt(e.target.value) || 0 })}
-                      />
-                    </div>
+                    {isAdmin && (
+                      <div>
+                        <Label className="text-xs">Price per Unit</Label>
+                        <Input
+                          type="number"
+                          value={editValues.pricePerUnit ?? ""}
+                          onChange={(e) => setEditValues({ ...editValues, pricePerUnit: parseInt(e.target.value) || 0 })}
+                        />
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 gap-4">

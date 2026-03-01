@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { Staff } from "@/lib/models/Staff";
 import { Inventory } from "@/lib/models/Inventory";
 import { Settlement } from "@/lib/models/Settlement";
+import { DebtPayment } from "@/lib/models/DebtPayment";
 import {
   sendMessage,
   editMessage,
@@ -17,8 +18,18 @@ import {
 } from "@/lib/telegram";
 import { parseUPIScreenshot } from "@/lib/ocr";
 
+const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || "";
+
 export async function POST(request: Request) {
   try {
+    // Webhook verification
+    if (WEBHOOK_SECRET) {
+      const token = request.headers.get("x-telegram-bot-api-secret-token");
+      if (token !== WEBHOOK_SECRET) {
+        return NextResponse.json({ ok: false }, { status: 403 });
+      }
+    }
+
     const update = await request.json();
     await connectDB();
 
@@ -51,7 +62,7 @@ async function handleMessage(message: {
   }
 
   // Check if user is in a conversation flow
-  const session = getSession(chatId);
+  const session = await getSession(chatId);
   if (session) {
     await handleSessionInput(chatId, text, session);
     return;
@@ -106,6 +117,7 @@ async function handleCallback(query: {
 
   // Main menu
   if (data === "main_menu") {
+    await clearSession(chatId);
     await editMessage(
       chatId,
       messageId,
@@ -129,7 +141,7 @@ async function handleCallback(query: {
 
   if (data.startsWith("inv_edit_")) {
     const size = data.replace("inv_edit_", "");
-    setSession(chatId, {
+    await setSession(chatId, {
       step: "inv_full",
       data: { cylinderSize: size, messageId },
     });
@@ -147,7 +159,7 @@ async function handleCallback(query: {
   }
 
   if (data === "add_staff") {
-    setSession(chatId, { step: "staff_name", data: { messageId } });
+    await setSession(chatId, { step: "staff_name", data: { messageId } });
     await sendMessage(chatId, "👥 <b>Add New Staff</b>\n\nEnter staff <b>name</b>:");
     return;
   }
@@ -164,6 +176,18 @@ async function handleCallback(query: {
     return;
   }
 
+  // Debt payment
+  if (data.startsWith("debt_pay_")) {
+    const staffId = data.replace("debt_pay_", "");
+    await setSession(chatId, { step: "debt_amount", data: { staffId, messageId } });
+    const staff = await Staff.findById(staffId).lean();
+    await sendMessage(
+      chatId,
+      `💰 <b>Pay Debt for ${staff?.name || "Staff"}</b>\n\nCurrent debt: <b>${formatINR(staff?.debtBalance || 0)}</b>\n\nEnter payment amount:`
+    );
+    return;
+  }
+
   // New Settlement
   if (data === "new_settlement") {
     await handleNewSettlementStart(chatId, messageId);
@@ -174,22 +198,25 @@ async function handleCallback(query: {
     const staffId = data.replace("settle_staff_", "");
     const staff = await Staff.findById(staffId).lean();
     if (!staff) return;
-    setSession(chatId, {
-      step: "settle_cylinder",
+    await setSession(chatId, {
+      step: "settle_date",
       data: { staffId, staffName: staff.name, items: [], messageId },
     });
-    await handleSettleCylinderSelect(chatId);
+    await sendMessage(
+      chatId,
+      `📅 Enter settlement <b>date</b> (DD/MM/YYYY) or type <b>today</b>:`
+    );
     return;
   }
 
   if (data.startsWith("settle_cyl_")) {
     const size = data.replace("settle_cyl_", "");
-    const session = getSession(chatId);
+    const session = await getSession(chatId);
     if (!session) return;
     const isOCR = session.step === "ocr_settle_cylinder";
     session.data.currentCylinder = size;
     session.step = isOCR ? "ocr_settle_qty" : "settle_qty";
-    setSession(chatId, session);
+    await setSession(chatId, session);
     await sendMessage(
       chatId,
       `📝 Enter <b>quantity</b> for ${size} cylinder:`
@@ -198,15 +225,15 @@ async function handleCallback(query: {
   }
 
   if (data === "settle_done_cylinders") {
-    const session = getSession(chatId);
+    const session = await getSession(chatId);
     if (!session || !(session.data.items as unknown[]).length) {
       await sendMessage(chatId, "⚠️ Add at least one cylinder first.");
       return;
     }
     const isOCR = session.step === "ocr_settle_cylinder";
-    session.step = isOCR ? "ocr_settle_expenses" : "settle_expenses";
-    setSession(chatId, session);
-    await sendMessage(chatId, "💰 Enter <b>expenses</b> amount (or 0):");
+    session.step = isOCR ? "ocr_settle_add_payment" : "settle_add_payment";
+    await setSession(chatId, session);
+    await sendMessage(chatId, "💰 Enter <b>add payment</b> (extra collected) amount (or 0):");
     return;
   }
 
@@ -216,7 +243,7 @@ async function handleCallback(query: {
   }
 
   if (data === "settle_cancel") {
-    clearSession(chatId);
+    await clearSession(chatId);
     await sendMessage(chatId, "❌ Settlement cancelled.", mainMenuKeyboard());
     return;
   }
@@ -258,7 +285,7 @@ async function handleSessionInput(
     }
     session.data.fullStock = val;
     session.step = "inv_empty";
-    setSession(chatId, session);
+    await setSession(chatId, session);
     await sendMessage(chatId, "Enter new <b>Empty Stock</b> count:");
     return;
   }
@@ -271,7 +298,7 @@ async function handleSessionInput(
     }
     session.data.emptyStock = val;
     session.step = "inv_price";
-    setSession(chatId, session);
+    await setSession(chatId, session);
     await sendMessage(chatId, "Enter new <b>Price per Unit</b> (₹):");
     return;
   }
@@ -289,7 +316,7 @@ async function handleSessionInput(
       { cylinderSize },
       { fullStock, emptyStock, pricePerUnit: val }
     );
-    clearSession(chatId);
+    await clearSession(chatId);
     await sendMessage(
       chatId,
       `✅ <b>${cylinderSize} Cylinder</b> updated!\n\nFull: ${fullStock} | Empty: ${emptyStock} | Price: ${formatINR(val)}`,
@@ -309,7 +336,7 @@ async function handleSessionInput(
     }
     session.data.name = text;
     session.step = "staff_phone";
-    setSession(chatId, session);
+    await setSession(chatId, session);
     await sendMessage(chatId, "Enter <b>phone number</b> (or send - to skip):");
     return;
   }
@@ -317,7 +344,7 @@ async function handleSessionInput(
   if (session.step === "staff_phone") {
     session.data.phone = text === "-" ? "" : text;
     session.step = "staff_address";
-    setSession(chatId, session);
+    await setSession(chatId, session);
     await sendMessage(chatId, "Enter <b>address</b> (or send - to skip):");
     return;
   }
@@ -329,7 +356,7 @@ async function handleSessionInput(
       phone: (session.data.phone as string) || "",
       address: (session.data.address as string) || "",
     });
-    clearSession(chatId);
+    await clearSession(chatId);
     await sendMessage(
       chatId,
       `✅ Staff <b>${session.data.name as string}</b> added successfully!`,
@@ -338,6 +365,86 @@ async function handleSessionInput(
         [{ text: "🏠 Main Menu", callback_data: "main_menu" }],
       ])
     );
+    return;
+  }
+
+  // ── Debt payment flow ──
+  if (session.step === "debt_amount") {
+    const amount = parseFloat(text);
+    if (isNaN(amount) || amount <= 0) {
+      await sendMessage(chatId, "⚠️ Enter a valid amount (> 0):");
+      return;
+    }
+    const staffId = session.data.staffId as string;
+    const staff = await Staff.findById(staffId);
+    if (!staff) {
+      await clearSession(chatId);
+      await sendMessage(chatId, "⚠️ Staff not found.", mainMenuKeyboard());
+      return;
+    }
+    if (amount > staff.debtBalance) {
+      await sendMessage(chatId, `⚠️ Amount exceeds debt balance (${formatINR(staff.debtBalance)}). Enter a smaller amount:`);
+      return;
+    }
+
+    session.data.amount = amount;
+    session.step = "debt_note";
+    await setSession(chatId, session);
+    await sendMessage(chatId, "📝 Enter a <b>note</b> for this payment (or send - to skip):");
+    return;
+  }
+
+  if (session.step === "debt_note") {
+    const note = text === "-" ? "" : text;
+    const staffId = session.data.staffId as string;
+    const amount = session.data.amount as number;
+
+    await DebtPayment.create({
+      staff: staffId,
+      amount,
+      note,
+    });
+    await Staff.findByIdAndUpdate(staffId, { $inc: { debtBalance: -amount } });
+
+    const staff = await Staff.findById(staffId).lean();
+    await clearSession(chatId);
+    await sendMessage(
+      chatId,
+      `✅ <b>Debt Payment Recorded</b>\n\n💰 Amount: ${formatINR(amount)}\n👤 Staff: ${staff?.name || "Unknown"}\n📝 Note: ${note || "—"}\n🔴 Remaining Debt: ${formatINR(staff?.debtBalance || 0)}`,
+      inlineKeyboard([
+        [{ text: `👤 ${staff?.name || "Staff"}`, callback_data: `staff_detail_${staffId}` }],
+        [{ text: "🏠 Main Menu", callback_data: "main_menu" }],
+      ])
+    );
+    return;
+  }
+
+  // ── Settlement date step ──
+  if (session.step === "settle_date") {
+    let settlementDate: Date;
+    if (text.toLowerCase() === "today") {
+      settlementDate = new Date();
+    } else {
+      // Parse DD/MM/YYYY
+      const parts = text.split("/");
+      if (parts.length === 3) {
+        const day = parseInt(parts[0]);
+        const month = parseInt(parts[1]) - 1;
+        const year = parseInt(parts[2]);
+        settlementDate = new Date(year, month, day);
+        if (isNaN(settlementDate.getTime())) {
+          await sendMessage(chatId, "⚠️ Invalid date. Enter DD/MM/YYYY or type <b>today</b>:");
+          return;
+        }
+      } else {
+        await sendMessage(chatId, "⚠️ Invalid format. Enter DD/MM/YYYY or type <b>today</b>:");
+        return;
+      }
+    }
+    session.data.date = settlementDate.toISOString();
+    session.step = "settle_cylinder";
+    await setSession(chatId, session);
+    await handleSettleCylinderSelect(chatId);
     return;
   }
 
@@ -355,8 +462,28 @@ async function handleSessionInput(
     });
     session.data.items = items;
     session.step = "settle_cylinder";
-    setSession(chatId, session);
+    await setSession(chatId, session);
     await handleSettleCylinderSelect(chatId);
+    return;
+  }
+
+  // Add payment step
+  if (session.step === "settle_add_payment") {
+    const val = parseFloat(text) || 0;
+    session.data.addPayment = val;
+    session.step = "settle_reduce_payment";
+    await setSession(chatId, session);
+    await sendMessage(chatId, "💸 Enter <b>reduce payment</b> (discounts/returns) amount (or 0):");
+    return;
+  }
+
+  // Reduce payment step
+  if (session.step === "settle_reduce_payment") {
+    const val = parseFloat(text) || 0;
+    session.data.reducePayment = val;
+    session.step = "settle_expenses";
+    await setSession(chatId, session);
+    await sendMessage(chatId, "💰 Enter <b>expenses</b> amount (or 0):");
     return;
   }
 
@@ -364,8 +491,118 @@ async function handleSessionInput(
     const val = parseFloat(text) || 0;
     session.data.expenses = val;
     session.step = "settle_actual_cash";
-    setSession(chatId, session);
+    await setSession(chatId, session);
     await sendMessage(chatId, "💵 Enter <b>actual cash received</b>:");
+    return;
+  }
+
+  if (session.step === "settle_actual_cash") {
+    const val = parseFloat(text) || 0;
+    session.data.actualCash = val;
+    session.step = "settle_denomination";
+    await setSession(chatId, session);
+    await sendMessage(
+      chatId,
+      "💵 Enter <b>cash denominations</b> (optional):\n\nFormat: <code>500x2, 200x1, 100x5</code>\n\nOr send <b>-</b> to skip."
+    );
+    return;
+  }
+
+  // Denomination step
+  if (session.step === "settle_denomination") {
+    let denominations: { note: number; count: number; total: number }[] = [];
+    let denominationTotal = 0;
+
+    if (text !== "-") {
+      const parts = text.split(",").map((s) => s.trim());
+      for (const part of parts) {
+        const match = part.match(/^(\d+)\s*[xX×]\s*(\d+)$/);
+        if (match) {
+          const note = parseInt(match[1]);
+          const count = parseInt(match[2]);
+          denominations.push({ note, count, total: note * count });
+          denominationTotal += note * count;
+        }
+      }
+    }
+
+    session.data.denominations = denominations;
+    session.data.denominationTotal = denominationTotal;
+    session.step = "settle_notes";
+    await setSession(chatId, session);
+    await sendMessage(chatId, "📝 Enter <b>notes</b> (or send <b>-</b> to skip):");
+    return;
+  }
+
+  // Notes step
+  if (session.step === "settle_notes") {
+    session.data.notes = text === "-" ? "" : text;
+
+    // Calculate summary
+    const items = session.data.items as { cylinderSize: string; quantity: number }[];
+    let grossRevenue = 0;
+    const itemLines: string[] = [];
+
+    for (const item of items) {
+      const inv = await Inventory.findOne({ cylinderSize: item.cylinderSize }).lean();
+      const price = inv?.pricePerUnit || 0;
+      const total = item.quantity * price;
+      grossRevenue += total;
+      itemLines.push(
+        `  ${item.cylinderSize}: ${item.quantity} × ${formatINR(price)} = ${formatINR(total)}`
+      );
+    }
+
+    const addPayment = (session.data.addPayment as number) || 0;
+    const reducePayment = (session.data.reducePayment as number) || 0;
+    const expenses = (session.data.expenses as number) || 0;
+    const actualCash = (session.data.actualCash as number) || 0;
+    const expectedCash = grossRevenue + addPayment - reducePayment - expenses;
+    const shortage = Math.max(0, expectedCash - actualCash);
+    const denominationTotal = (session.data.denominationTotal as number) || 0;
+    const dateStr = session.data.date ? formatDateShort(session.data.date as string) : formatDateShort(new Date());
+
+    session.data.grossRevenue = grossRevenue;
+    session.data.expectedCash = expectedCash;
+    session.data.shortage = shortage;
+    session.step = "settle_confirm";
+    await setSession(chatId, session);
+
+    const summary = [
+      `📝 <b>Settlement Summary</b>`,
+      ``,
+      `👤 Staff: <b>${session.data.staffName}</b>`,
+      `📅 Date: ${dateStr}`,
+      ``,
+      `📦 <b>Cylinders:</b>`,
+      ...itemLines,
+      ``,
+      `💰 Gross Revenue: <b>${formatINR(grossRevenue)}</b>`,
+      addPayment > 0 ? `➕ Add Payment: ${formatINR(addPayment)}` : null,
+      reducePayment > 0 ? `➖ Reduce Payment: ${formatINR(reducePayment)}` : null,
+      `📉 Expenses: ${formatINR(expenses)}`,
+      `📊 Expected Cash: ${formatINR(expectedCash)}`,
+      `💵 Actual Cash: ${formatINR(actualCash)}`,
+      denominationTotal > 0 ? `🏷️ Denomination Total: ${formatINR(denominationTotal)}` : null,
+      denominationTotal > 0 && denominationTotal !== actualCash
+        ? `⚠️ Denomination mismatch!`
+        : null,
+      shortage > 0
+        ? `⚠️ Shortage: <b>${formatINR(shortage)}</b>`
+        : `✅ No shortage`,
+      session.data.notes ? `📝 Notes: ${session.data.notes}` : null,
+    ].filter(Boolean).join("\n");
+
+    await sendMessage(
+      chatId,
+      summary,
+      inlineKeyboard([
+        [
+          { text: "✅ Confirm", callback_data: "settle_confirm" },
+          { text: "❌ Cancel", callback_data: "settle_cancel" },
+        ],
+      ])
+    );
     return;
   }
 
@@ -383,8 +620,28 @@ async function handleSessionInput(
     });
     session.data.items = items;
     session.step = "ocr_settle_cylinder";
-    setSession(chatId, session);
+    await setSession(chatId, session);
     await handleOCRCylinderSelect(chatId);
+    return;
+  }
+
+  // OCR add payment
+  if (session.step === "ocr_settle_add_payment") {
+    const val = parseFloat(text) || 0;
+    session.data.addPayment = val;
+    session.step = "ocr_settle_reduce_payment";
+    await setSession(chatId, session);
+    await sendMessage(chatId, "💸 Enter <b>reduce payment</b> (discounts/returns) amount (or 0):");
+    return;
+  }
+
+  // OCR reduce payment
+  if (session.step === "ocr_settle_reduce_payment") {
+    const val = parseFloat(text) || 0;
+    session.data.reducePayment = val;
+    session.step = "ocr_settle_expenses";
+    await setSession(chatId, session);
+    await sendMessage(chatId, "💰 Enter <b>expenses</b> amount (or 0):");
     return;
   }
 
@@ -408,14 +665,16 @@ async function handleSessionInput(
       );
     }
 
-    const expectedCash = grossRevenue - val;
+    const addPayment = (session.data.addPayment as number) || 0;
+    const reducePayment = (session.data.reducePayment as number) || 0;
+    const expectedCash = grossRevenue + addPayment - reducePayment - val;
     const shortage = Math.max(0, expectedCash - actualCash);
 
     session.data.grossRevenue = grossRevenue;
     session.data.expectedCash = expectedCash;
     session.data.shortage = shortage;
     session.step = "settle_confirm";
-    setSession(chatId, session);
+    await setSession(chatId, session);
 
     const summary = [
       `📝 <b>Settlement Summary</b>`,
@@ -427,73 +686,15 @@ async function handleSessionInput(
       ...itemLines,
       ``,
       `💰 Gross Revenue: <b>${formatINR(grossRevenue)}</b>`,
+      addPayment > 0 ? `➕ Add Payment: ${formatINR(addPayment)}` : null,
+      reducePayment > 0 ? `➖ Reduce Payment: ${formatINR(reducePayment)}` : null,
       `📉 Expenses: ${formatINR(val)}`,
       `📊 Expected Cash: ${formatINR(expectedCash)}`,
       `💵 Actual Cash (from UPI): ${formatINR(actualCash)}`,
       shortage > 0
         ? `⚠️ Shortage: <b>${formatINR(shortage)}</b>`
         : `✅ No shortage`,
-    ].join("\n");
-
-    await sendMessage(
-      chatId,
-      summary,
-      inlineKeyboard([
-        [
-          { text: "✅ Confirm", callback_data: "settle_confirm" },
-          { text: "❌ Cancel", callback_data: "settle_cancel" },
-        ],
-      ])
-    );
-    return;
-  }
-
-  if (session.step === "settle_actual_cash") {
-    const val = parseFloat(text) || 0;
-    session.data.actualCash = val;
-
-    // Calculate summary
-    const items = session.data.items as { cylinderSize: string; quantity: number }[];
-    let grossRevenue = 0;
-    const itemLines: string[] = [];
-
-    for (const item of items) {
-      const inv = await Inventory.findOne({ cylinderSize: item.cylinderSize }).lean();
-      const price = inv?.pricePerUnit || 0;
-      const total = item.quantity * price;
-      grossRevenue += total;
-      itemLines.push(
-        `  ${item.cylinderSize}: ${item.quantity} × ${formatINR(price)} = ${formatINR(total)}`
-      );
-    }
-
-    const expenses = (session.data.expenses as number) || 0;
-    const expectedCash = grossRevenue - expenses;
-    const shortage = Math.max(0, expectedCash - val);
-
-    session.data.grossRevenue = grossRevenue;
-    session.data.expectedCash = expectedCash;
-    session.data.shortage = shortage;
-    session.step = "settle_confirm";
-    setSession(chatId, session);
-
-    const summary = [
-      `📝 <b>Settlement Summary</b>`,
-      ``,
-      `👤 Staff: <b>${session.data.staffName}</b>`,
-      `📅 Date: ${formatDateShort(new Date())}`,
-      ``,
-      `📦 <b>Cylinders:</b>`,
-      ...itemLines,
-      ``,
-      `💰 Gross Revenue: <b>${formatINR(grossRevenue)}</b>`,
-      `📉 Expenses: ${formatINR(expenses)}`,
-      `📊 Expected Cash: ${formatINR(expectedCash)}`,
-      `💵 Actual Cash: ${formatINR(val)}`,
-      shortage > 0
-        ? `⚠️ Shortage: <b>${formatINR(shortage)}</b>`
-        : `✅ No shortage`,
-    ].join("\n");
+    ].filter(Boolean).join("\n");
 
     await sendMessage(
       chatId,
@@ -767,16 +968,20 @@ async function handleStaffDetailEdit(
     settlementLines,
   ].join("\n");
 
-  await editMessage(
-    chatId,
-    messageId,
-    msg,
-    inlineKeyboard([
-      [{ text: "📋 Full Ledger", callback_data: `staff_ledger_${staffId}` }],
-      [{ text: "👥 Back to Staff", callback_data: "staff_list" }],
-      [{ text: "🏠 Main Menu", callback_data: "main_menu" }],
-    ])
+  const buttons: { text: string; callback_data: string }[][] = [
+    [{ text: "📋 Full Ledger", callback_data: `staff_ledger_${staffId}` }],
+  ];
+
+  if (staff.debtBalance > 0) {
+    buttons.push([{ text: "💰 Pay Debt", callback_data: `debt_pay_${staffId}` }]);
+  }
+
+  buttons.push(
+    [{ text: "👥 Back to Staff", callback_data: "staff_list" }],
+    [{ text: "🏠 Main Menu", callback_data: "main_menu" }]
   );
+
+  await editMessage(chatId, messageId, msg, inlineKeyboard(buttons));
 }
 
 async function handleStaffLedgerEdit(
@@ -855,7 +1060,7 @@ async function handleNewSettlementStart(chatId: number, messageId: number) {
 }
 
 async function handleSettleCylinderSelect(chatId: number) {
-  const session = getSession(chatId);
+  const session = await getSession(chatId);
   if (!session) return;
 
   const items = session.data.items as { cylinderSize: string; quantity: number }[];
@@ -882,18 +1087,24 @@ async function handleSettleCylinderSelect(chatId: number) {
 }
 
 async function handleSettleConfirm(chatId: number) {
-  const session = getSession(chatId);
+  const session = await getSession(chatId);
   if (!session) return;
 
-  const { staffId, items, expenses, actualCash, grossRevenue, expectedCash, shortage } =
+  const { staffId, items, expenses, actualCash, addPayment, reducePayment, grossRevenue, expectedCash, shortage, date, notes, denominations, denominationTotal } =
     session.data as {
       staffId: string;
       items: { cylinderSize: string; quantity: number }[];
       expenses: number;
       actualCash: number;
+      addPayment: number;
+      reducePayment: number;
       grossRevenue: number;
       expectedCash: number;
       shortage: number;
+      date?: string;
+      notes?: string;
+      denominations?: { note: number; count: number; total: number }[];
+      denominationTotal?: number;
     };
 
   // Process settlement
@@ -916,15 +1127,18 @@ async function handleSettleConfirm(chatId: number) {
 
   await Settlement.create({
     staff: staffId,
-    date: new Date(),
+    date: date ? new Date(date) : new Date(),
     items: processedItems,
     grossRevenue,
-    addPayment: 0,
-    reducePayment: 0,
+    addPayment: addPayment || 0,
+    reducePayment: reducePayment || 0,
     expenses: expenses || 0,
     expectedCash,
     actualCash: actualCash || 0,
     shortage: shortage || 0,
+    notes: notes || "",
+    denominations: denominations || [],
+    denominationTotal: denominationTotal || 0,
   });
 
   // Update staff debt
@@ -932,7 +1146,7 @@ async function handleSettleConfirm(chatId: number) {
     await Staff.findByIdAndUpdate(staffId, { $inc: { debtBalance: shortage } });
   }
 
-  clearSession(chatId);
+  await clearSession(chatId);
 
   await sendMessage(
     chatId,
@@ -975,6 +1189,19 @@ async function handlePhotoMessage(
     const imageRes = await fetch(
       `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`
     );
+
+    // Validate image download
+    if (!imageRes.ok) {
+      await sendMessage(chatId, "⚠️ Could not download the image. Please try again.");
+      return;
+    }
+
+    const contentType = imageRes.headers.get("content-type") || "";
+    if (!contentType.startsWith("image/")) {
+      await sendMessage(chatId, "⚠️ The file does not appear to be an image. Please send a screenshot.");
+      return;
+    }
+
     const imageBuffer = Buffer.from(await imageRes.arrayBuffer());
 
     // Run OCR
@@ -983,18 +1210,27 @@ async function handlePhotoMessage(
     if (!result) {
       await sendMessage(
         chatId,
-        "❌ Could not read the payment screenshot. Please try a clearer image.",
+        "❌ Could not read a UPI payment from this image. Please send a clear UPI payment screenshot.",
         mainMenuKeyboard()
       );
       return;
     }
 
-    const statusIcon = result.status === "success" ? "✅" : "❌";
+    // Reject failed transactions
+    if (result.status === "failed") {
+      await sendMessage(
+        chatId,
+        "❌ This appears to be a <b>failed</b> UPI transaction. Only successful payments can be applied to settlements.",
+        mainMenuKeyboard()
+      );
+      return;
+    }
+
     const msg = [
       `📸 <b>Payment Detected:</b>`,
       ``,
       `💰 Amount: <b>${formatINR(result.amount)}</b>`,
-      `${statusIcon} Status: ${result.status}`,
+      `✅ Status: ${result.status}`,
       `🔢 TxnID: <code>${result.transaction_id}</code>`,
       `📅 Date: ${result.date}`,
       `👤 From: ${result.sender_name}`,
@@ -1062,7 +1298,7 @@ async function handleOCRStaffSelected(
   const staff = await Staff.findById(staffId).lean();
   if (!staff) return;
 
-  setSession(chatId, {
+  await setSession(chatId, {
     step: "ocr_settle_cylinder",
     data: { staffId, staffName: staff.name, items: [], actualCash: amount },
   });
@@ -1071,7 +1307,7 @@ async function handleOCRStaffSelected(
 }
 
 async function handleOCRCylinderSelect(chatId: number) {
-  const session = getSession(chatId);
+  const session = await getSession(chatId);
   if (!session) return;
 
   const items = session.data.items as { cylinderSize: string; quantity: number }[];

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Pencil, Trash2, Users, Search, BookOpen, Loader2 } from "lucide-react";
 import Link from "next/link";
@@ -37,6 +38,8 @@ interface StaffMember {
 }
 
 export default function StaffPage() {
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "admin";
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -172,14 +175,16 @@ export default function StaffPage() {
                   <Pencil className="h-4 w-4" />
                   Edit
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-red-600 hover:text-red-700"
-                  onClick={() => setDeleteConfirm(member._id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                {isAdmin && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-600 hover:text-red-700"
+                    onClick={() => setDeleteConfirm(member._id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
             </motion.div>
           ))}
@@ -240,14 +245,16 @@ export default function StaffPage() {
                         <Button variant="ghost" size="icon" onClick={() => handleEdit(member)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-red-600 hover:text-red-700"
-                          onClick={() => setDeleteConfirm(member._id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {isAdmin && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-red-600 hover:text-red-700"
+                            onClick={() => setDeleteConfirm(member._id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </motion.tr>

@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Inventory } from "@/lib/models/Inventory";
+import { requireAuth } from "@/lib/auth";
 
 export async function GET() {
+  const { error } = await requireAuth();
+  if (error) return error;
+
   try {
     await connectDB();
     const inventory = await Inventory.find({}).sort({ cylinderSize: 1 }).lean();
@@ -14,14 +18,23 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  const { error, session } = await requireAuth();
+  if (error) return error;
+
   try {
     await connectDB();
     const body = await request.json();
     const { cylinderSize, fullStock, emptyStock, pricePerUnit } = body;
 
+    // Managers cannot change pricePerUnit
+    const update: Record<string, unknown> = { fullStock, emptyStock };
+    if (session!.user.role === "admin") {
+      update.pricePerUnit = pricePerUnit;
+    }
+
     const inventory = await Inventory.findOneAndUpdate(
       { cylinderSize },
-      { fullStock, emptyStock, pricePerUnit },
+      update,
       { new: true }
     );
 

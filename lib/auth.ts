@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcryptjs from "bcryptjs";
@@ -54,3 +55,24 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     strategy: "jwt",
   },
 });
+
+// Auth helper for API routes - returns 401 if not logged in
+export async function requireAuth() {
+  const session = await auth();
+  if (!session?.user) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }), session: null };
+  }
+  return { error: null, session };
+}
+
+// Admin-only helper - returns 403 if not admin
+export async function requireAdmin() {
+  const session = await auth();
+  if (!session?.user) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }), session: null };
+  }
+  if (session.user.role !== "admin") {
+    return { error: NextResponse.json({ error: "Forbidden: Admin access required" }, { status: 403 }), session: null };
+  }
+  return { error: null, session };
+}

@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { formatCurrency } from "@/lib/utils";
 import { toast } from "@/lib/use-toast";
+import { DenominationEntry } from "@/components/denomination-entry";
 
 interface StaffOption {
   _id: string;
@@ -47,6 +48,7 @@ export default function NewSettlementPage() {
   const [expenses, setExpenses] = useState(0);
   const [actualCash, setActualCash] = useState(0);
   const [notes, setNotes] = useState("");
+  const [denominations, setDenominations] = useState<{ note: number; count: number; total: number }[]>([]);
   const [saving, setSaving] = useState(false);
   const [attempted, setAttempted] = useState(false);
 
@@ -106,6 +108,8 @@ export default function NewSettlementPage() {
         expenses,
         actualCash,
         notes,
+        denominations: denominations.filter((d) => d.count > 0),
+        denominationTotal: denominations.reduce((sum, d) => sum + d.total, 0),
       }),
     });
 
@@ -278,6 +282,20 @@ export default function NewSettlementPage() {
                   placeholder="0"
                 />
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Denomination Entry */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Cash Denomination (Optional)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DenominationEntry
+                denominations={denominations}
+                onChange={setDenominations}
+                actualCash={actualCash}
+              />
             </CardContent>
           </Card>
 

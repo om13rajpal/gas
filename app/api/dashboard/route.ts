@@ -3,8 +3,12 @@ import { connectDB } from "@/lib/db";
 import { Settlement } from "@/lib/models/Settlement";
 import { Inventory } from "@/lib/models/Inventory";
 import { Staff } from "@/lib/models/Staff";
+import { requireAuth } from "@/lib/auth";
 
 export async function GET(request: Request) {
+  const { error } = await requireAuth();
+  if (error) return error;
+
   try {
     await connectDB();
 

@@ -1,25 +1,35 @@
+import { connectDB } from "./db";
+import { TelegramSession } from "./models/TelegramSession";
+
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const API_BASE = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-// Session management for multi-step flows
+// Session management - persisted to MongoDB
 interface SessionState {
   step: string;
   data: Record<string, unknown>;
   messageId?: number;
 }
 
-const sessions = new Map<number, SessionState>();
-
-export function getSession(chatId: number): SessionState | undefined {
-  return sessions.get(chatId);
+export async function getSession(chatId: number): Promise<SessionState | undefined> {
+  await connectDB();
+  const session = await TelegramSession.findOne({ chatId }).lean();
+  if (!session) return undefined;
+  return { step: session.step, data: session.data as Record<string, unknown> };
 }
 
-export function setSession(chatId: number, state: SessionState) {
-  sessions.set(chatId, state);
+export async function setSession(chatId: number, state: SessionState) {
+  await connectDB();
+  await TelegramSession.findOneAndUpdate(
+    { chatId },
+    { step: state.step, data: state.data, expiresAt: new Date(Date.now() + 60 * 60 * 1000) },
+    { upsert: true }
+  );
 }
 
-export function clearSession(chatId: number) {
-  sessions.delete(chatId);
+export async function clearSession(chatId: number) {
+  await connectDB();
+  await TelegramSession.deleteOne({ chatId });
 }
 
 // Telegram API helpers

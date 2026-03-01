@@ -7,6 +7,12 @@ export interface ISettlementItem {
   total: number;
 }
 
+export interface IDenomination {
+  note: number;
+  count: number;
+  total: number;
+}
+
 export interface ISettlement extends Document {
   staff: Types.ObjectId;
   date: Date;
@@ -19,6 +25,8 @@ export interface ISettlement extends Document {
   actualCash: number;
   shortage: number;
   notes: string;
+  denominations: IDenomination[];
+  denominationTotal: number;
   createdBy: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -47,6 +55,12 @@ const SettlementSchema = new Schema<ISettlement>(
     actualCash: { type: Number, default: 0 },
     shortage: { type: Number, default: 0 },
     notes: { type: String, default: "" },
+    denominations: [{
+      note: { type: Number, required: true },
+      count: { type: Number, required: true },
+      total: { type: Number, required: true },
+    }],
+    denominationTotal: { type: Number, default: 0 },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true }

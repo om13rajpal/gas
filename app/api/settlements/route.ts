@@ -3,8 +3,12 @@ import { connectDB } from "@/lib/db";
 import { Settlement } from "@/lib/models/Settlement";
 import { Staff } from "@/lib/models/Staff";
 import { Inventory } from "@/lib/models/Inventory";
+import { requireAuth } from "@/lib/auth";
 
 export async function GET(request: Request) {
+  const { error } = await requireAuth();
+  if (error) return error;
+
   try {
     await connectDB();
     const { searchParams } = new URL(request.url);
@@ -33,6 +37,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const { error, session } = await requireAuth();
+  if (error) return error;
+
   try {
     await connectDB();
     const body = await request.json();
@@ -91,6 +98,9 @@ export async function POST(request: Request) {
       actualCash: actualCash || 0,
       shortage,
       notes: notes || "",
+      denominations: body.denominations || [],
+      denominationTotal: body.denominationTotal || 0,
+      createdBy: session!.user.id,
     });
 
     // Update staff debt if shortage

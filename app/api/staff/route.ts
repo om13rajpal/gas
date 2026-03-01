@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Staff } from "@/lib/models/Staff";
+import { requireAuth } from "@/lib/auth";
 
 export async function GET() {
+  const { error } = await requireAuth();
+  if (error) return error;
+
   try {
     await connectDB();
     const staff = await Staff.find({ isActive: true }).sort({ name: 1 }).lean();
@@ -14,6 +18,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const { error } = await requireAuth();
+  if (error) return error;
+
   try {
     await connectDB();
     const body = await request.json();
