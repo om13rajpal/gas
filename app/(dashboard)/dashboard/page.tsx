@@ -1,0 +1,239 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import { Package, TrendingUp, TrendingDown, AlertTriangle, Users, IndianRupee } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatCurrency } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
+
+interface DashboardData {
+  stats: {
+    totalDeliveries: number;
+    totalRevenue: number;
+    totalExpenses: number;
+    totalShortage: number;
+    totalActualCash: number;
+    staffCount: number;
+    totalDebt: number;
+  };
+  inventory: Array<{
+    cylinderSize: string;
+    fullStock: number;
+    emptyStock: number;
+    pricePerUnit: number;
+  }>;
+  recentSettlements: Array<{
+    _id: string;
+    staff: { name: string };
+    date: string;
+    grossRevenue: number;
+    shortage: number;
+  }>;
+}
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.06 },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
+};
+
+export default function DashboardPage() {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/dashboard")
+      .then((r) => r.json())
+      .then(setData)
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <p className="text-zinc-500 text-sm mt-1">Daily overview and statistics</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <Skeleton key={i} className="h-32 rounded-xl" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const stats = data?.stats;
+
+  const statCards = [
+    {
+      title: "Total Deliveries",
+      value: stats?.totalDeliveries || 0,
+      suffix: "cylinders",
+      icon: Package,
+      color: "text-blue-600",
+      bg: "bg-blue-50 dark:bg-blue-900/20",
+    },
+    {
+      title: "Total Revenue",
+      value: formatCurrency(stats?.totalRevenue || 0),
+      icon: TrendingUp,
+      color: "text-emerald-600",
+      bg: "bg-emerald-50 dark:bg-emerald-900/20",
+    },
+    {
+      title: "Total Expenses",
+      value: formatCurrency(stats?.totalExpenses || 0),
+      icon: TrendingDown,
+      color: "text-amber-600",
+      bg: "bg-amber-50 dark:bg-amber-900/20",
+    },
+    {
+      title: "Total Shortage",
+      value: formatCurrency(stats?.totalShortage || 0),
+      icon: AlertTriangle,
+      color: "text-red-600",
+      bg: "bg-red-50 dark:bg-red-900/20",
+    },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <p className="text-zinc-500 text-sm mt-1">
+          Today&apos;s overview &mdash; {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+        </p>
+      </div>
+
+      <motion.div
+        variants={containerVariants}
+        initial="hidden"
+        animate="show"
+        className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+      >
+        {statCards.map((card) => (
+          <motion.div key={card.title} variants={itemVariants}>
+            <Card className="hover:shadow-md transition-shadow">
+              <CardContent className="p-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-zinc-500">{card.title}</p>
+                    <p className="text-2xl font-bold mt-1">{card.value}</p>
+                    {card.suffix && (
+                      <p className="text-xs text-zinc-400 mt-0.5">{card.suffix}</p>
+                    )}
+                  </div>
+                  <div className={`${card.bg} p-3 rounded-xl`}>
+                    <card.icon className={`h-5 w-5 ${card.color}`} />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        ))}
+      </motion.div>
+
+      <motion.div
+        variants={containerVariants}
+        initial="hidden"
+        animate="show"
+        className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+      >
+        <motion.div variants={itemVariants}>
+          <Card>
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-zinc-500">Active Staff</p>
+                  <p className="text-2xl font-bold mt-1">{stats?.staffCount || 0}</p>
+                </div>
+                <div className="bg-violet-50 dark:bg-violet-900/20 p-3 rounded-xl">
+                  <Users className="h-5 w-5 text-violet-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        <motion.div variants={itemVariants}>
+          <Card>
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-zinc-500">Cash Collected</p>
+                  <p className="text-2xl font-bold mt-1">{formatCurrency(stats?.totalActualCash || 0)}</p>
+                </div>
+                <div className="bg-sky-50 dark:bg-sky-900/20 p-3 rounded-xl">
+                  <IndianRupee className="h-5 w-5 text-sky-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        <motion.div variants={itemVariants}>
+          <Card>
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-zinc-500">Total Staff Debt</p>
+                  <p className="text-2xl font-bold mt-1">{formatCurrency(stats?.totalDebt || 0)}</p>
+                </div>
+                <div className="bg-rose-50 dark:bg-rose-900/20 p-3 rounded-xl">
+                  <AlertTriangle className="h-5 w-5 text-rose-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      </motion.div>
+
+      {/* Inventory Overview */}
+      <motion.div variants={itemVariants} initial="hidden" animate="show">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Inventory Overview</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {data?.inventory.map((item) => (
+                <div
+                  key={item.cylinderSize}
+                  className="rounded-lg border border-zinc-100 dark:border-zinc-800 p-4"
+                >
+                  <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                    {item.cylinderSize} Cylinder
+                  </p>
+                  <div className="mt-2 flex items-center gap-4">
+                    <div>
+                      <p className="text-xs text-zinc-500">Full</p>
+                      <p className="text-lg font-bold text-emerald-600">{item.fullStock}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-zinc-500">Empty</p>
+                      <p className="text-lg font-bold text-amber-600">{item.emptyStock}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-zinc-500">Price</p>
+                      <p className="text-lg font-bold">{formatCurrency(item.pricePerUnit)}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+    </div>
+  );
+}
