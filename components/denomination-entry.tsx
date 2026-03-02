@@ -17,7 +17,7 @@ interface DenominationEntryProps {
   actualCash?: number;
 }
 
-const NOTES = [500, 200, 100, 50, 20, 10];
+const NOTES = [2000, 500, 200, 100, 50, 20, 10];
 
 export function DenominationEntry({ denominations, onChange, actualCash }: DenominationEntryProps) {
   const denominationTotal = denominations.reduce((sum, d) => sum + d.total, 0);

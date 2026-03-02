@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { connectDB } from "@/lib/db";
+import { connectDB, withTransaction } from "@/lib/db";
 import { Staff } from "@/lib/models/Staff";
 import { DebtPayment } from "@/lib/models/DebtPayment";
 import { requireAuth } from "@/lib/auth";
@@ -33,27 +33,38 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "Amount must be greater than 0" }, { status: 400 });
     }
 
-    const staff = await Staff.findById(id);
-    if (!staff) {
-      return NextResponse.json({ error: "Staff not found" }, { status: 404 });
-    }
+    const payment = await withTransaction(async (txSession) => {
+      const staff = await Staff.findById(id).session(txSession);
+      if (!staff) {
+        throw new Error("Staff not found");
+      }
 
-    if (amount > staff.debtBalance) {
-      return NextResponse.json({ error: "Amount exceeds debt balance" }, { status: 400 });
-    }
+      if (amount > staff.debtBalance) {
+        throw new Error("Amount exceeds debt balance");
+      }
 
-    const payment = await DebtPayment.create({
-      staff: id,
-      amount,
-      note: note || "",
-      recordedBy: session!.user.id,
+      const [p] = await DebtPayment.create(
+        [
+          {
+            staff: id,
+            amount,
+            note: note || "",
+            recordedBy: session!.user.id,
+          },
+        ],
+        { session: txSession }
+      );
+
+      await Staff.findByIdAndUpdate(id, { $inc: { debtBalance: -amount } }, { session: txSession });
+
+      return p;
     });
-
-    await Staff.findByIdAndUpdate(id, { $inc: { debtBalance: -amount } });
 
     return NextResponse.json(payment, { status: 201 });
   } catch (err) {
     console.error("DebtPayment POST error:", err);
-    return NextResponse.json({ error: "Failed to record debt payment" }, { status: 500 });
+    const message = err instanceof Error ? err.message : "Failed to record debt payment";
+    const status = message.includes("not found") ? 404 : message.includes("exceeds") ? 400 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

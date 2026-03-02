@@ -20,6 +20,12 @@ import { formatCurrency } from "@/lib/utils";
 import { toast } from "@/lib/use-toast";
 import { DenominationEntry } from "@/components/denomination-entry";
 
+interface CustomerOption {
+  _id: string;
+  name: string;
+  phone: string;
+}
+
 interface StaffOption {
   _id: string;
   name: string;
@@ -39,8 +45,10 @@ interface SettlementItem {
 export default function NewSettlementPage() {
   const router = useRouter();
   const [staffList, setStaffList] = useState<StaffOption[]>([]);
+  const [customerList, setCustomerList] = useState<CustomerOption[]>([]);
   const [inventoryList, setInventoryList] = useState<InventoryOption[]>([]);
   const [staffId, setStaffId] = useState("");
+  const [customerId, setCustomerId] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [items, setItems] = useState<SettlementItem[]>([{ cylinderSize: "", quantity: 0 }]);
   const [addPayment, setAddPayment] = useState(0);
@@ -56,9 +64,11 @@ export default function NewSettlementPage() {
     Promise.all([
       fetch("/api/staff").then((r) => r.json()),
       fetch("/api/inventory").then((r) => r.json()),
-    ]).then(([s, i]) => {
+      fetch("/api/customers").then((r) => r.json()),
+    ]).then(([s, i, c]) => {
       setStaffList(s);
       setInventoryList(i);
+      setCustomerList(c.customers || []);
     });
   }, []);
 
@@ -90,6 +100,18 @@ export default function NewSettlementPage() {
   const hasValidItems = items.some((i) => i.cylinderSize && i.quantity > 0);
   const canSubmit = !!staffId && hasValidItems;
 
+  const getStockWarning = (item: SettlementItem) => {
+    if (!item.cylinderSize || item.quantity <= 0) return null;
+    const inv = inventoryList.find((i) => i.cylinderSize === item.cylinderSize);
+    if (!inv) return null;
+    if (item.quantity > inv.fullStock) {
+      return `Only ${inv.fullStock} available in stock`;
+    }
+    return null;
+  };
+
+  const selectedSizes = items.map((i) => i.cylinderSize).filter(Boolean);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAttempted(true);
@@ -110,6 +132,7 @@ export default function NewSettlementPage() {
         notes,
         denominations: denominations.filter((d) => d.count > 0),
         denominationTotal: denominations.reduce((sum, d) => sum + d.total, 0),
+        customerId: customerId && customerId !== "none" ? customerId : undefined,
       }),
     });
 
@@ -117,7 +140,12 @@ export default function NewSettlementPage() {
       toast({ title: "Settlement created", description: "New settlement has been recorded", variant: "success" });
       router.push("/settlements");
     } else {
-      toast({ title: "Error", description: "Failed to create settlement", variant: "destructive" });
+      const data = await res.json().catch(() => null);
+      toast({
+        title: "Error",
+        description: data?.error || "Failed to create settlement",
+        variant: "destructive",
+      });
       setSaving(false);
     }
   };
@@ -170,6 +198,22 @@ export default function NewSettlementPage() {
                 <Label>Date *</Label>
                 <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
               </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Customer (Optional)</Label>
+                <Select value={customerId} onValueChange={setCustomerId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select customer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No customer</SelectItem>
+                    {customerList.map((c) => (
+                      <SelectItem key={c._id} value={c._id}>
+                        {c.name}{c.phone ? ` — ${c.phone}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </CardContent>
           </Card>
 
@@ -185,47 +229,58 @@ export default function NewSettlementPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {items.map((item, idx) => (
-                <div key={idx} className="flex items-end gap-3">
-                  <div className="flex-1 space-y-1">
-                    <Label className="text-xs">Size</Label>
-                    <Select
-                      value={item.cylinderSize}
-                      onValueChange={(v) => updateItem(idx, "cylinderSize", v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select size" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {inventoryList.map((inv) => (
-                          <SelectItem key={inv.cylinderSize} value={inv.cylinderSize}>
-                            {inv.cylinderSize} — {formatCurrency(inv.pricePerUnit)} (Stock: {inv.fullStock})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              {items.map((item, idx) => {
+                const stockWarning = getStockWarning(item);
+                const availableSizes = inventoryList.filter(
+                  (inv) => inv.cylinderSize === item.cylinderSize || !selectedSizes.includes(inv.cylinderSize)
+                );
+                return (
+                  <div key={idx} className="space-y-1">
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1 space-y-1">
+                        <Label className="text-xs">Size</Label>
+                        <Select
+                          value={item.cylinderSize}
+                          onValueChange={(v) => updateItem(idx, "cylinderSize", v)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select size" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableSizes.map((inv) => (
+                              <SelectItem key={inv.cylinderSize} value={inv.cylinderSize}>
+                                {inv.cylinderSize} — {formatCurrency(inv.pricePerUnit)} (Stock: {inv.fullStock})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="w-24 space-y-1">
+                        <Label className="text-xs">Qty</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={item.quantity || ""}
+                          onChange={(e) => updateItem(idx, "quantity", parseInt(e.target.value) || 0)}
+                        />
+                      </div>
+                      <div className="w-28 text-right">
+                        <p className="text-sm font-medium">
+                          {formatCurrency(item.quantity * getPrice(item.cylinderSize))}
+                        </p>
+                      </div>
+                      {items.length > 1 && (
+                        <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(idx)}>
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      )}
+                    </div>
+                    {stockWarning && (
+                      <p className="text-xs text-amber-600 pl-1">{stockWarning}</p>
+                    )}
                   </div>
-                  <div className="w-24 space-y-1">
-                    <Label className="text-xs">Qty</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={item.quantity || ""}
-                      onChange={(e) => updateItem(idx, "quantity", parseInt(e.target.value) || 0)}
-                    />
-                  </div>
-                  <div className="w-28 text-right">
-                    <p className="text-sm font-medium">
-                      {formatCurrency(item.quantity * getPrice(item.cylinderSize))}
-                    </p>
-                  </div>
-                  {items.length > 1 && (
-                    <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(idx)}>
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
               <div className="text-right pt-2 border-t border-zinc-100 dark:border-zinc-800">
                 <p className="text-sm text-zinc-500">Gross Revenue</p>
                 <p className="text-xl font-bold">{formatCurrency(grossRevenue)}</p>

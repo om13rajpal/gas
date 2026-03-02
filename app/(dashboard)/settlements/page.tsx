@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Plus, FileText } from "lucide-react";
+import { Plus, FileText, Eye } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -73,7 +73,7 @@ export default function SettlementsPage() {
           {/* Mobile card view */}
           <div className="block sm:hidden space-y-3">
             {data.settlements.map((s) => (
-              <Link key={s._id} href={`/staff/${s.staff._id}/ledger`}>
+              <Link key={s._id} href={`/settlements/${s._id}`}>
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -123,6 +123,7 @@ export default function SettlementsPage() {
                     <TableHead>Expected</TableHead>
                     <TableHead>Actual</TableHead>
                     <TableHead>Shortage</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -133,7 +134,11 @@ export default function SettlementsPage() {
                       animate={{ opacity: 1 }}
                       className="border-b border-zinc-100 dark:border-zinc-800"
                     >
-                      <TableCell className="font-medium">{formatDate(s.date)}</TableCell>
+                      <TableCell className="font-medium">
+                        <Link href={`/settlements/${s._id}`} className="hover:underline">
+                          {formatDate(s.date)}
+                        </Link>
+                      </TableCell>
                       <TableCell>
                         <Link href={`/staff/${s.staff._id}/ledger`} className="hover:underline">
                           {s.staff.name}
@@ -157,11 +162,19 @@ export default function SettlementsPage() {
                           {formatCurrency(s.shortage)}
                         </Badge>
                       </TableCell>
+                      <TableCell className="text-right">
+                        <Link href={`/settlements/${s._id}`}>
+                          <Button variant="ghost" size="sm">
+                            <Eye className="h-4 w-4" />
+                            View
+                          </Button>
+                        </Link>
+                      </TableCell>
                     </motion.tr>
                   ))}
                   {data.settlements.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-12 text-zinc-500">
+                      <TableCell colSpan={9} className="text-center py-12 text-zinc-500">
                         <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
                         No settlements yet
                       </TableCell>

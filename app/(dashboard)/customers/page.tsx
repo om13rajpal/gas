@@ -3,13 +3,11 @@
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Pencil, Trash2, Users, Search, BookOpen, Loader2 } from "lucide-react";
-import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Plus, Pencil, Trash2, Contact, Search, Loader2 } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -25,90 +23,87 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
-import { formatCurrency } from "@/lib/utils";
 import { toast } from "@/lib/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 
-interface StaffMember {
+interface Customer {
   _id: string;
   name: string;
   phone: string;
   address: string;
-  debtBalance: number;
+  notes: string;
 }
 
-export default function StaffPage() {
+export default function CustomersPage() {
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "admin";
-  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", phone: "", address: "" });
+  const [form, setForm] = useState({ name: "", phone: "", address: "", notes: "" });
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-  const [showInactive, setShowInactive] = useState(false);
 
-  const fetchStaff = (inactive?: boolean) => {
-    setLoading(true);
-    const url = (inactive ?? showInactive) ? "/api/staff?inactive=true" : "/api/staff";
-    fetch(url)
+  const fetchCustomers = () => {
+    fetch("/api/customers")
       .then((r) => r.json())
-      .then(setStaff)
+      .then((data) => setCustomers(data.customers || []))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchStaff(); }, [showInactive]);
+  useEffect(() => { fetchCustomers(); }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
 
     if (editingId) {
-      await fetch(`/api/staff/${editingId}`, {
+      await fetch(`/api/customers/${editingId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      toast({ title: "Staff updated", description: `${form.name} has been updated`, variant: "success" });
+      toast({ title: "Customer updated", description: `${form.name} has been updated`, variant: "success" });
     } else {
-      await fetch("/api/staff", {
+      await fetch("/api/customers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      toast({ title: "Staff added", description: `${form.name} has been added`, variant: "success" });
+      toast({ title: "Customer added", description: `${form.name} has been added`, variant: "success" });
     }
 
     setDialogOpen(false);
     setEditingId(null);
-    setForm({ name: "", phone: "", address: "" });
+    setForm({ name: "", phone: "", address: "", notes: "" });
     setSaving(false);
-    fetchStaff();
+    fetchCustomers();
   };
 
-  const handleEdit = (member: StaffMember) => {
-    setEditingId(member._id);
-    setForm({ name: member.name, phone: member.phone, address: member.address });
+  const handleEdit = (customer: Customer) => {
+    setEditingId(customer._id);
+    setForm({ name: customer.name, phone: customer.phone, address: customer.address, notes: customer.notes });
     setDialogOpen(true);
   };
 
   const handleDelete = async (id: string) => {
-    await fetch(`/api/staff/${id}`, { method: "DELETE" });
+    await fetch(`/api/customers/${id}`, { method: "DELETE" });
     setDeleteConfirm(null);
-    toast({ title: "Staff deleted", description: "Staff member has been removed", variant: "destructive" });
-    fetchStaff();
+    toast({ title: "Customer deleted", description: "Customer has been removed", variant: "destructive" });
+    fetchCustomers();
   };
 
-  const filtered = staff.filter((s) =>
-    s.name.toLowerCase().includes(search.toLowerCase())
+  const filtered = customers.filter((c) =>
+    c.name.toLowerCase().includes(search.toLowerCase()) ||
+    c.phone.toLowerCase().includes(search.toLowerCase())
   );
 
   if (loading) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Staff Management</h1>
+        <h1 className="text-2xl font-bold">Customer Database</h1>
         <Skeleton className="h-10 w-full rounded-xl" />
         <div className="space-y-3">
           {[...Array(5)].map((_, i) => (
@@ -123,61 +118,31 @@ export default function StaffPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Staff Management</h1>
-          <p className="text-zinc-500 text-sm mt-1">
-            {staff.length} {showInactive ? "inactive" : "active"} staff members
-          </p>
+          <h1 className="text-2xl font-bold">Customer Database</h1>
+          <p className="text-zinc-500 text-sm mt-1">{customers.length} active customers</p>
         </div>
-        <div className="flex items-center gap-2">
-          {!showInactive && (
-            <Button onClick={() => { setEditingId(null); setForm({ name: "", phone: "", address: "" }); setDialogOpen(true); }}>
-              <Plus className="h-4 w-4" />
-              Add Staff
-            </Button>
-          )}
-        </div>
+        <Button onClick={() => { setEditingId(null); setForm({ name: "", phone: "", address: "", notes: "" }); setDialogOpen(true); }}>
+          <Plus className="h-4 w-4" />
+          Add Customer
+        </Button>
       </div>
 
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
-          <Input
-            placeholder="Search staff..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-          <button
-            className={`px-3 py-2 text-sm font-medium transition-colors ${
-              !showInactive
-                ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900"
-                : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
-            }`}
-            onClick={() => setShowInactive(false)}
-          >
-            Active
-          </button>
-          <button
-            className={`px-3 py-2 text-sm font-medium transition-colors ${
-              showInactive
-                ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900"
-                : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
-            }`}
-            onClick={() => setShowInactive(true)}
-          >
-            Inactive
-          </button>
-        </div>
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+        <Input
+          placeholder="Search customers..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-9"
+        />
       </div>
 
       {/* Mobile card view */}
       <div className="block sm:hidden space-y-3">
         <AnimatePresence>
-          {filtered.map((member) => (
+          {filtered.map((customer) => (
             <motion.div
-              key={member._id}
+              key={customer._id}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -186,25 +151,22 @@ export default function StaffPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="h-9 w-9 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-sm font-bold">
-                    {member.name.charAt(0)}
+                    {customer.name.charAt(0)}
                   </div>
                   <div>
-                    <p className="font-medium">{member.name}</p>
-                    <p className="text-xs text-zinc-500">{member.phone || "No phone"}</p>
+                    <p className="font-medium">{customer.name}</p>
+                    <p className="text-xs text-zinc-500">{customer.phone || "No phone"}</p>
                   </div>
                 </div>
-                <Badge variant={member.debtBalance > 0 ? "destructive" : "success"}>
-                  {formatCurrency(member.debtBalance)}
-                </Badge>
               </div>
+              {customer.address && (
+                <p className="text-xs text-zinc-500">{customer.address}</p>
+              )}
+              {customer.notes && (
+                <p className="text-xs text-zinc-400 truncate">{customer.notes}</p>
+              )}
               <div className="flex items-center justify-end gap-1 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                <Link href={`/staff/${member._id}/ledger`}>
-                  <Button variant="ghost" size="sm">
-                    <BookOpen className="h-4 w-4" />
-                    Ledger
-                  </Button>
-                </Link>
-                <Button variant="ghost" size="sm" onClick={() => handleEdit(member)}>
+                <Button variant="ghost" size="sm" onClick={() => handleEdit(customer)}>
                   <Pencil className="h-4 w-4" />
                   Edit
                 </Button>
@@ -213,7 +175,7 @@ export default function StaffPage() {
                     variant="ghost"
                     size="sm"
                     className="text-red-600 hover:text-red-700"
-                    onClick={() => setDeleteConfirm(member._id)}
+                    onClick={() => setDeleteConfirm(customer._id)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -224,8 +186,8 @@ export default function StaffPage() {
         </AnimatePresence>
         {filtered.length === 0 && (
           <div className="text-center py-12 text-zinc-500">
-            <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-            {search ? "No staff found matching search" : "No staff members yet"}
+            <Contact className="h-8 w-8 mx-auto mb-2 opacity-50" />
+            {search ? "No customers found matching search" : "No customers yet"}
           </div>
         )}
       </div>
@@ -239,15 +201,15 @@ export default function StaffPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Phone</TableHead>
                 <TableHead>Address</TableHead>
-                <TableHead>Debt Balance</TableHead>
+                <TableHead>Notes</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <AnimatePresence>
-                {filtered.map((member) => (
+                {filtered.map((customer) => (
                   <motion.tr
-                    key={member._id}
+                    key={customer._id}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -256,26 +218,21 @@ export default function StaffPage() {
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-3">
                         <div className="h-8 w-8 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-xs font-bold">
-                          {member.name.charAt(0)}
+                          {customer.name.charAt(0)}
                         </div>
-                        {member.name}
+                        {customer.name}
                       </div>
                     </TableCell>
-                    <TableCell>{member.phone || "—"}</TableCell>
-                    <TableCell>{member.address || "—"}</TableCell>
+                    <TableCell>{customer.phone || "\u2014"}</TableCell>
+                    <TableCell>{customer.address || "\u2014"}</TableCell>
                     <TableCell>
-                      <Badge variant={member.debtBalance > 0 ? "destructive" : "success"}>
-                        {formatCurrency(member.debtBalance)}
-                      </Badge>
+                      <span className="truncate block max-w-[200px]">
+                        {customer.notes || "\u2014"}
+                      </span>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
-                        <Link href={`/staff/${member._id}/ledger`}>
-                          <Button variant="ghost" size="icon" title="View Ledger">
-                            <BookOpen className="h-4 w-4" />
-                          </Button>
-                        </Link>
-                        <Button variant="ghost" size="icon" onClick={() => handleEdit(member)}>
+                        <Button variant="ghost" size="icon" onClick={() => handleEdit(customer)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
                         {isAdmin && (
@@ -283,7 +240,7 @@ export default function StaffPage() {
                             variant="ghost"
                             size="icon"
                             className="text-red-600 hover:text-red-700"
-                            onClick={() => setDeleteConfirm(member._id)}
+                            onClick={() => setDeleteConfirm(customer._id)}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -296,8 +253,8 @@ export default function StaffPage() {
               {filtered.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-12 text-zinc-500">
-                    <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    {search ? "No staff found matching search" : "No staff members yet"}
+                    <Contact className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    {search ? "No customers found matching search" : "No customers yet"}
                   </TableCell>
                 </TableRow>
               )}
@@ -310,9 +267,9 @@ export default function StaffPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingId ? "Edit Staff" : "Add New Staff"}</DialogTitle>
+            <DialogTitle>{editingId ? "Edit Customer" : "Add New Customer"}</DialogTitle>
             <DialogDescription>
-              {editingId ? "Update staff member details" : "Add a new staff member to the system"}
+              {editingId ? "Update customer details" : "Add a new customer to the database"}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -322,7 +279,7 @@ export default function StaffPage() {
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 required
-                placeholder="Enter staff name"
+                placeholder="Enter customer name"
               />
             </div>
             <div className="space-y-2">
@@ -341,13 +298,21 @@ export default function StaffPage() {
                 placeholder="Enter address"
               />
             </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Input
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                placeholder="Any notes about this customer"
+              />
+            </div>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={saving}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                {editingId ? "Update" : "Add"} Staff
+                {editingId ? "Update" : "Add"} Customer
               </Button>
             </div>
           </form>
@@ -358,9 +323,9 @@ export default function StaffPage() {
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Staff Member</DialogTitle>
+            <DialogTitle>Delete Customer</DialogTitle>
             <DialogDescription>
-              Are you sure? This staff member will be deactivated and hidden from the system.
+              Are you sure? This customer will be deactivated and hidden from the system.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2">

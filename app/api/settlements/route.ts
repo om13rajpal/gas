@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { connectDB } from "@/lib/db";
+import { connectDB, withTransaction } from "@/lib/db";
 import { Settlement } from "@/lib/models/Settlement";
 import { Staff } from "@/lib/models/Staff";
 import { Inventory } from "@/lib/models/Inventory";
@@ -22,6 +22,7 @@ export async function GET(request: Request) {
     const [settlements, total] = await Promise.all([
       Settlement.find(query)
         .populate("staff", "name")
+        .populate("customer", "name phone")
         .sort({ date: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -44,77 +45,86 @@ export async function POST(request: Request) {
     await connectDB();
     const body = await request.json();
 
-    const { staffId, date, items, addPayment, reducePayment, expenses, actualCash, notes } = body;
+    const { staffId, date, items, addPayment, reducePayment, expenses, actualCash, notes, customerId } = body;
 
-    // Calculate gross revenue
-    let grossRevenue = 0;
-    const processedItems = [];
+    const result = await withTransaction(async (txSession) => {
+      // Calculate gross revenue and validate stock
+      let grossRevenue = 0;
+      const processedItems = [];
 
-    for (const item of items) {
-      const inventory = await Inventory.findOne({ cylinderSize: item.cylinderSize });
-      if (!inventory) {
-        return NextResponse.json(
-          { error: `Inventory not found for ${item.cylinderSize}` },
-          { status: 400 }
+      for (const item of items) {
+        const inventory = await Inventory.findOne({ cylinderSize: item.cylinderSize }).session(txSession);
+        if (!inventory) {
+          throw new Error(`Inventory not found for ${item.cylinderSize}`);
+        }
+
+        if (inventory.fullStock < item.quantity) {
+          throw new Error(
+            `Insufficient stock for ${item.cylinderSize}: only ${inventory.fullStock} available, requested ${item.quantity}`
+          );
+        }
+
+        const pricePerUnit = inventory.pricePerUnit;
+        const total = item.quantity * pricePerUnit;
+        grossRevenue += total;
+
+        processedItems.push({
+          cylinderSize: item.cylinderSize,
+          quantity: item.quantity,
+          pricePerUnit,
+          total,
+        });
+
+        // Update inventory: reduce full stock, increase empty stock
+        await Inventory.findOneAndUpdate(
+          { cylinderSize: item.cylinderSize },
+          { $inc: { fullStock: -item.quantity, emptyStock: item.quantity } },
+          { session: txSession }
         );
       }
 
-      const pricePerUnit = inventory.pricePerUnit;
-      const total = item.quantity * pricePerUnit;
-      grossRevenue += total;
+      // Calculate expected cash and shortage
+      const expectedCash = grossRevenue + (addPayment || 0) - (reducePayment || 0) - (expenses || 0);
+      const shortage = Math.max(0, expectedCash - (actualCash || 0));
 
-      processedItems.push({
-        cylinderSize: item.cylinderSize,
-        quantity: item.quantity,
-        pricePerUnit,
-        total,
-      });
-
-      // Update inventory: reduce full stock, increase empty stock
-      await Inventory.findOneAndUpdate(
-        { cylinderSize: item.cylinderSize },
-        {
-          $inc: {
-            fullStock: -item.quantity,
-            emptyStock: item.quantity,
+      const [settlement] = await Settlement.create(
+        [
+          {
+            staff: staffId,
+            date: new Date(date),
+            items: processedItems,
+            grossRevenue,
+            addPayment: addPayment || 0,
+            reducePayment: reducePayment || 0,
+            expenses: expenses || 0,
+            expectedCash,
+            actualCash: actualCash || 0,
+            shortage,
+            notes: notes || "",
+            denominations: body.denominations || [],
+            denominationTotal: body.denominationTotal || 0,
+            createdBy: session!.user.id,
+            customer: customerId || undefined,
           },
-        }
+        ],
+        { session: txSession }
       );
-    }
 
-    // Calculate expected cash and shortage
-    const expectedCash = grossRevenue + (addPayment || 0) - (reducePayment || 0) - (expenses || 0);
-    const shortage = Math.max(0, expectedCash - (actualCash || 0));
+      // Update staff debt if shortage
+      if (shortage > 0) {
+        await Staff.findByIdAndUpdate(staffId, { $inc: { debtBalance: shortage } }, { session: txSession });
+      }
 
-    const settlement = await Settlement.create({
-      staff: staffId,
-      date: new Date(date),
-      items: processedItems,
-      grossRevenue,
-      addPayment: addPayment || 0,
-      reducePayment: reducePayment || 0,
-      expenses: expenses || 0,
-      expectedCash,
-      actualCash: actualCash || 0,
-      shortage,
-      notes: notes || "",
-      denominations: body.denominations || [],
-      denominationTotal: body.denominationTotal || 0,
-      createdBy: session!.user.id,
+      return settlement;
     });
 
-    // Update staff debt if shortage
-    if (shortage > 0) {
-      await Staff.findByIdAndUpdate(staffId, {
-        $inc: { debtBalance: shortage },
-      });
-    }
-
-    const populated = await Settlement.findById(settlement._id).populate("staff", "name");
+    const populated = await Settlement.findById(result._id).populate("staff", "name").populate("customer", "name phone");
 
     return NextResponse.json(populated, { status: 201 });
   } catch (error) {
     console.error("Settlement POST error:", error);
-    return NextResponse.json({ error: "Failed to create settlement" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Failed to create settlement";
+    const status = message.includes("Insufficient stock") || message.includes("not found") ? 400 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

@@ -5,6 +5,8 @@ import { Inventory } from "@/lib/models/Inventory";
 import { Staff } from "@/lib/models/Staff";
 import { requireAuth } from "@/lib/auth";
 
+const LOW_STOCK_THRESHOLD = parseInt(process.env.LOW_STOCK_THRESHOLD || "10");
+
 export async function GET(request: Request) {
   const { error } = await requireAuth();
   if (error) return error;
@@ -15,11 +17,20 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const dateParam = searchParams.get("date");
 
-    const date = dateParam ? new Date(dateParam) : new Date();
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
+    // Use IST timezone for date calculations
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    let istDateStr: string;
+
+    if (dateParam) {
+      istDateStr = dateParam;
+    } else {
+      const now = new Date();
+      const istNow = new Date(now.getTime() + istOffset);
+      istDateStr = istNow.toISOString().split("T")[0];
+    }
+
+    const startOfDay = new Date(istDateStr + "T00:00:00.000+05:30");
+    const endOfDay = new Date(istDateStr + "T23:59:59.999+05:30");
 
     const [settlements, inventory, staffCount, totalDebt] = await Promise.all([
       Settlement.find({ date: { $gte: startOfDay, $lte: endOfDay } }).populate("staff", "name"),
@@ -37,6 +48,15 @@ export async function GET(request: Request) {
     const totalShortage = settlements.reduce((acc, s) => acc + s.shortage, 0);
     const totalActualCash = settlements.reduce((acc, s) => acc + s.actualCash, 0);
 
+    // Low stock alerts
+    const lowStockAlerts = inventory
+      .filter((item) => item.fullStock < LOW_STOCK_THRESHOLD)
+      .map((item) => ({
+        cylinderSize: item.cylinderSize,
+        fullStock: item.fullStock,
+        threshold: LOW_STOCK_THRESHOLD,
+      }));
+
     return NextResponse.json({
       stats: {
         totalDeliveries,
@@ -49,6 +69,8 @@ export async function GET(request: Request) {
       },
       inventory,
       recentSettlements: settlements.slice(0, 10),
+      lowStockAlerts,
+      date: istDateStr,
     });
   } catch (error) {
     console.error("Dashboard error:", error);

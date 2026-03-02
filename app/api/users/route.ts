@@ -10,7 +10,7 @@ export async function GET() {
 
   try {
     await connectDB();
-    const users = await User.find({}).select("-password").sort({ createdAt: -1 }).lean();
+    const users = await User.find({ isActive: { $ne: false } }).select("-password").sort({ createdAt: -1 }).lean();
     return NextResponse.json(users);
   } catch (err) {
     console.error("Users GET error:", err);
@@ -29,6 +29,10 @@ export async function POST(request: Request) {
 
     if (!name || !email || !password) {
       return NextResponse.json({ error: "Name, email and password are required" }, { status: 400 });
+    }
+
+    if (password.length < 6) {
+      return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
     }
 
     const existing = await User.findOne({ email: email.toLowerCase() });

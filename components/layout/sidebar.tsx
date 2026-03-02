@@ -8,7 +8,9 @@ import {
   LayoutDashboard,
   Package,
   Users,
+  Contact,
   FileText,
+  BarChart3,
   BookOpen,
   Settings,
   LogOut,
@@ -24,7 +26,9 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/inventory", label: "Inventory", icon: Package },
   { href: "/staff", label: "Staff", icon: Users },
+  { href: "/customers", label: "Customers", icon: Contact },
   { href: "/settlements", label: "Settlements", icon: FileText },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

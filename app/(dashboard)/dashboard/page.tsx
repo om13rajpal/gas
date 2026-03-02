@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Package, TrendingUp, TrendingDown, AlertTriangle, Users, IndianRupee } from "lucide-react";
+import { Package, TrendingUp, TrendingDown, AlertTriangle, Users, IndianRupee, ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -30,6 +32,12 @@ interface DashboardData {
     grossRevenue: number;
     shortage: number;
   }>;
+  lowStockAlerts: Array<{
+    cylinderSize: string;
+    fullStock: number;
+    threshold: number;
+  }>;
+  date: string;
 }
 
 const containerVariants = {
@@ -45,18 +53,44 @@ const itemVariants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
+function getTodayIST(): string {
+  const now = new Date();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(now.getTime() + istOffset);
+  return istNow.toISOString().split("T")[0];
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(getTodayIST());
 
-  useEffect(() => {
-    fetch("/api/dashboard")
+  const fetchData = (date: string) => {
+    setLoading(true);
+    fetch(`/api/dashboard?date=${date}`)
       .then((r) => r.json())
       .then(setData)
       .finally(() => setLoading(false));
-  }, []);
+  };
 
-  if (loading) {
+  useEffect(() => {
+    fetchData(selectedDate);
+  }, [selectedDate]);
+
+  const changeDate = (delta: number) => {
+    const d = new Date(selectedDate);
+    d.setDate(d.getDate() + delta);
+    setSelectedDate(d.toISOString().split("T")[0]);
+  };
+
+  const isToday = selectedDate === getTodayIST();
+
+  const formatDisplayDate = (dateStr: string) => {
+    const d = new Date(dateStr + "T12:00:00");
+    return d.toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  };
+
+  if (loading && !data) {
     return (
       <div className="space-y-6">
         <div>
@@ -108,12 +142,59 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-zinc-500 text-sm mt-1">
-          Today&apos;s overview &mdash; {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
-        </p>
+      <div className="flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <p className="text-zinc-500 text-sm mt-1">
+            {isToday ? "Today's" : ""} overview &mdash; {formatDisplayDate(selectedDate)}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="icon" onClick={() => changeDate(-1)}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <div className="relative">
+            <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
+            <Input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="pl-9 w-[170px]"
+            />
+          </div>
+          <Button variant="outline" size="icon" onClick={() => changeDate(1)}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          {!isToday && (
+            <Button variant="outline" size="sm" onClick={() => setSelectedDate(getTodayIST())}>
+              Today
+            </Button>
+          )}
+        </div>
       </div>
+
+      {/* Low Stock Alerts */}
+      {data?.lowStockAlerts && data.lowStockAlerts.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
+          <Card className="border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-medium text-amber-800 dark:text-amber-200">Low Stock Alert</p>
+                  <div className="mt-1 space-y-1">
+                    {data.lowStockAlerts.map((alert) => (
+                      <p key={alert.cylinderSize} className="text-sm text-amber-700 dark:text-amber-300">
+                        {alert.cylinderSize}: Only <span className="font-bold">{alert.fullStock}</span> full cylinders remaining (threshold: {alert.threshold})
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
 
       <motion.div
         variants={containerVariants}
@@ -206,30 +287,39 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {data?.inventory.map((item) => (
-                <div
-                  key={item.cylinderSize}
-                  className="rounded-lg border border-zinc-100 dark:border-zinc-800 p-4"
-                >
-                  <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                    {item.cylinderSize} Cylinder
-                  </p>
-                  <div className="mt-2 flex items-center gap-4">
-                    <div>
-                      <p className="text-xs text-zinc-500">Full</p>
-                      <p className="text-lg font-bold text-emerald-600">{item.fullStock}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-zinc-500">Empty</p>
-                      <p className="text-lg font-bold text-amber-600">{item.emptyStock}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-zinc-500">Price</p>
-                      <p className="text-lg font-bold">{formatCurrency(item.pricePerUnit)}</p>
+              {data?.inventory.map((item) => {
+                const isLow = item.fullStock < (data?.lowStockAlerts?.find((a) => a.cylinderSize === item.cylinderSize) ? Infinity : -1);
+                const lowAlert = data?.lowStockAlerts?.find((a) => a.cylinderSize === item.cylinderSize);
+                return (
+                  <div
+                    key={item.cylinderSize}
+                    className={`rounded-lg border p-4 ${
+                      lowAlert
+                        ? "border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-900/10"
+                        : "border-zinc-100 dark:border-zinc-800"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                      {item.cylinderSize} Cylinder
+                      {lowAlert && <span className="text-amber-600 ml-1 text-xs">(Low)</span>}
+                    </p>
+                    <div className="mt-2 flex items-center gap-4">
+                      <div>
+                        <p className="text-xs text-zinc-500">Full</p>
+                        <p className={`text-lg font-bold ${lowAlert ? "text-amber-600" : "text-emerald-600"}`}>{item.fullStock}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-zinc-500">Empty</p>
+                        <p className="text-lg font-bold text-amber-600">{item.emptyStock}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-zinc-500">Price</p>
+                        <p className="text-lg font-bold">{formatCurrency(item.pricePerUnit)}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>

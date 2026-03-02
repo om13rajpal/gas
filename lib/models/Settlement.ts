@@ -15,6 +15,7 @@ export interface IDenomination {
 
 export interface ISettlement extends Document {
   staff: Types.ObjectId;
+  customer?: Types.ObjectId;
   date: Date;
   items: ISettlementItem[];
   grossRevenue: number;
@@ -45,6 +46,7 @@ const SettlementItemSchema = new Schema<ISettlementItem>(
 const SettlementSchema = new Schema<ISettlement>(
   {
     staff: { type: Schema.Types.ObjectId, ref: "Staff", required: true },
+    customer: { type: Schema.Types.ObjectId, ref: "Customer" },
     date: { type: Date, required: true },
     items: [SettlementItemSchema],
     grossRevenue: { type: Number, default: 0 },

@@ -3,13 +3,17 @@ import { connectDB } from "@/lib/db";
 import { Staff } from "@/lib/models/Staff";
 import { requireAuth } from "@/lib/auth";
 
-export async function GET() {
+export async function GET(request: Request) {
   const { error } = await requireAuth();
   if (error) return error;
 
   try {
     await connectDB();
-    const staff = await Staff.find({ isActive: true }).sort({ name: 1 }).lean();
+    const { searchParams } = new URL(request.url);
+    const showInactive = searchParams.get("inactive") === "true";
+
+    const query = showInactive ? { isActive: false } : { isActive: true };
+    const staff = await Staff.find(query).sort({ name: 1 }).lean();
     return NextResponse.json(staff);
   } catch (error) {
     console.error("Staff GET error:", error);

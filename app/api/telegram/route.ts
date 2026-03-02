@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { connectDB } from "@/lib/db";
+import { connectDB, withTransaction } from "@/lib/db";
 import { Staff } from "@/lib/models/Staff";
 import { Inventory } from "@/lib/models/Inventory";
 import { Settlement } from "@/lib/models/Settlement";
@@ -19,6 +19,7 @@ import {
 import { parseUPIScreenshot } from "@/lib/ocr";
 
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || "";
+const TELEGRAM_BOT_USER_ID = process.env.TELEGRAM_BOT_USER_ID || "";
 
 export async function POST(request: Request) {
   try {
@@ -31,6 +32,16 @@ export async function POST(request: Request) {
     }
 
     const update = await request.json();
+
+    const ALLOWED_CHAT_IDS = process.env.TELEGRAM_ALLOWED_CHAT_IDS;
+    if (ALLOWED_CHAT_IDS) {
+      const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
+      const allowed = ALLOWED_CHAT_IDS.split(",").map((id: string) => parseInt(id.trim()));
+      if (chatId && !allowed.includes(chatId)) {
+        return NextResponse.json({ ok: true });
+      }
+    }
+
     await connectDB();
 
     if (update.message) {
@@ -276,6 +287,12 @@ async function handleSessionInput(
   text: string,
   session: { step: string; data: Record<string, unknown> }
 ) {
+  if (text.toLowerCase() === "cancel" || text === "/cancel") {
+    await clearSession(chatId);
+    await sendMessage(chatId, "❌ Cancelled. Use /menu to see options.", mainMenuKeyboard());
+    return;
+  }
+
   // ── Inventory edit flow ──
   if (session.step === "inv_full") {
     const val = parseInt(text);
@@ -399,23 +416,40 @@ async function handleSessionInput(
     const staffId = session.data.staffId as string;
     const amount = session.data.amount as number;
 
-    await DebtPayment.create({
-      staff: staffId,
-      amount,
-      note,
-    });
-    await Staff.findByIdAndUpdate(staffId, { $inc: { debtBalance: -amount } });
+    try {
+      await withTransaction(async (txSession) => {
+        await DebtPayment.create(
+          [
+            {
+              staff: staffId,
+              amount,
+              note,
+              recordedBy: TELEGRAM_BOT_USER_ID || undefined,
+            },
+          ],
+          { session: txSession }
+        );
+        await Staff.findByIdAndUpdate(staffId, { $inc: { debtBalance: -amount } }, { session: txSession });
+      });
 
-    const staff = await Staff.findById(staffId).lean();
-    await clearSession(chatId);
-    await sendMessage(
-      chatId,
-      `✅ <b>Debt Payment Recorded</b>\n\n💰 Amount: ${formatINR(amount)}\n👤 Staff: ${staff?.name || "Unknown"}\n📝 Note: ${note || "—"}\n🔴 Remaining Debt: ${formatINR(staff?.debtBalance || 0)}`,
-      inlineKeyboard([
-        [{ text: `👤 ${staff?.name || "Staff"}`, callback_data: `staff_detail_${staffId}` }],
-        [{ text: "🏠 Main Menu", callback_data: "main_menu" }],
-      ])
-    );
+      const staff = await Staff.findById(staffId).lean();
+      await clearSession(chatId);
+      await sendMessage(
+        chatId,
+        `✅ <b>Debt Payment Recorded</b>\n\n💰 Amount: ${formatINR(amount)}\n👤 Staff: ${staff?.name || "Unknown"}\n📝 Note: ${note || "—"}\n🔴 Remaining Debt: ${formatINR(staff?.debtBalance || 0)}`,
+        inlineKeyboard([
+          [{ text: `👤 ${staff?.name || "Staff"}`, callback_data: `staff_detail_${staffId}` }],
+          [{ text: "🏠 Main Menu", callback_data: "main_menu" }],
+        ])
+      );
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : "Unknown error";
+      await sendMessage(
+        chatId,
+        `❌ <b>Debt Payment Failed</b>\n\n${errMsg}\n\nPlease try again.`,
+        mainMenuKeyboard()
+      );
+    }
     return;
   }
 
@@ -543,9 +577,11 @@ async function handleSessionInput(
     let grossRevenue = 0;
     const itemLines: string[] = [];
 
+    session.data.resolvedPrices = {};
     for (const item of items) {
       const inv = await Inventory.findOne({ cylinderSize: item.cylinderSize }).lean();
       const price = inv?.pricePerUnit || 0;
+      (session.data.resolvedPrices as Record<string, number>)[item.cylinderSize] = price;
       const total = item.quantity * price;
       grossRevenue += total;
       itemLines.push(
@@ -655,9 +691,11 @@ async function handleSessionInput(
     let grossRevenue = 0;
     const itemLines: string[] = [];
 
+    session.data.resolvedPrices = {};
     for (const item of items) {
       const inv = await Inventory.findOne({ cylinderSize: item.cylinderSize }).lean();
       const price = inv?.pricePerUnit || 0;
+      (session.data.resolvedPrices as Record<string, number>)[item.cylinderSize] = price;
       const total = item.quantity * price;
       grossRevenue += total;
       itemLines.push(
@@ -713,10 +751,12 @@ async function handleSessionInput(
 // ─── FEATURE HANDLERS ────────────────────────────────────────
 
 async function handleDashboard(chatId: number) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const endOfDay = new Date(today);
-  endOfDay.setHours(23, 59, 59, 999);
+  const now = new Date();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(now.getTime() + istOffset);
+  const istDateStr = istNow.toISOString().split("T")[0];
+  const today = new Date(istDateStr + "T00:00:00.000+05:30");
+  const endOfDay = new Date(istDateStr + "T23:59:59.999+05:30");
 
   const [settlements, staffCount, totalDebtAgg, inventory] = await Promise.all([
     Settlement.find({ date: { $gte: today, $lte: endOfDay } }).lean(),
@@ -769,10 +809,12 @@ async function handleDashboard(chatId: number) {
 }
 
 async function handleDashboardEdit(chatId: number, messageId: number) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const endOfDay = new Date(today);
-  endOfDay.setHours(23, 59, 59, 999);
+  const now = new Date();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(now.getTime() + istOffset);
+  const istDateStr = istNow.toISOString().split("T")[0];
+  const today = new Date(istDateStr + "T00:00:00.000+05:30");
+  const endOfDay = new Date(istDateStr + "T23:59:59.999+05:30");
 
   const [settlements, staffCount, totalDebtAgg, inventory] = await Promise.all([
     Settlement.find({ date: { $gte: today, $lte: endOfDay } }).lean(),
@@ -1107,56 +1149,96 @@ async function handleSettleConfirm(chatId: number) {
       denominationTotal?: number;
     };
 
-  // Process settlement
-  const processedItems = [];
-  for (const item of items) {
-    const inv = await Inventory.findOne({ cylinderSize: item.cylinderSize });
-    if (!inv) continue;
-    processedItems.push({
-      cylinderSize: item.cylinderSize,
-      quantity: item.quantity,
-      pricePerUnit: inv.pricePerUnit,
-      total: item.quantity * inv.pricePerUnit,
+  const resolvedPrices = (session.data as { resolvedPrices?: Record<string, number> }).resolvedPrices;
+
+  try {
+    await withTransaction(async (txSession) => {
+      // Validate stock and process items
+      const processedItems = [];
+      for (const item of items) {
+        const price = resolvedPrices?.[item.cylinderSize];
+        let pricePerUnit: number;
+
+        if (price === undefined) {
+          // Fallback to DB query
+          const inv = await Inventory.findOne({ cylinderSize: item.cylinderSize }).session(txSession);
+          if (!inv) continue;
+          if (inv.fullStock < item.quantity) {
+            throw new Error(`Insufficient stock for ${item.cylinderSize}: available ${inv.fullStock}, requested ${item.quantity}`);
+          }
+          pricePerUnit = inv.pricePerUnit;
+        } else {
+          // Validate stock even when using resolved price
+          const inv = await Inventory.findOne({ cylinderSize: item.cylinderSize }).session(txSession);
+          if (!inv) continue;
+          if (inv.fullStock < item.quantity) {
+            throw new Error(`Insufficient stock for ${item.cylinderSize}: available ${inv.fullStock}, requested ${item.quantity}`);
+          }
+          pricePerUnit = price;
+        }
+
+        processedItems.push({
+          cylinderSize: item.cylinderSize,
+          quantity: item.quantity,
+          pricePerUnit,
+          total: item.quantity * pricePerUnit,
+        });
+
+        // Update inventory
+        await Inventory.findOneAndUpdate(
+          { cylinderSize: item.cylinderSize },
+          { $inc: { fullStock: -item.quantity, emptyStock: item.quantity } },
+          { session: txSession }
+        );
+      }
+
+      await Settlement.create(
+        [
+          {
+            staff: staffId,
+            date: date ? new Date(date) : new Date(),
+            items: processedItems,
+            grossRevenue,
+            addPayment: addPayment || 0,
+            reducePayment: reducePayment || 0,
+            expenses: expenses || 0,
+            expectedCash,
+            actualCash: actualCash || 0,
+            shortage: shortage || 0,
+            notes: notes || "",
+            denominations: denominations || [],
+            denominationTotal: denominationTotal || 0,
+            createdBy: TELEGRAM_BOT_USER_ID || undefined,
+          },
+        ],
+        { session: txSession }
+      );
+
+      // Update staff debt
+      if (shortage > 0) {
+        await Staff.findByIdAndUpdate(staffId, { $inc: { debtBalance: shortage } }, { session: txSession });
+      }
     });
-    // Update inventory
-    await Inventory.findOneAndUpdate(
-      { cylinderSize: item.cylinderSize },
-      { $inc: { fullStock: -item.quantity, emptyStock: item.quantity } }
+
+    await clearSession(chatId);
+
+    await sendMessage(
+      chatId,
+      `✅ <b>Settlement Created!</b>\n\n💰 Revenue: ${formatINR(grossRevenue)}\n💵 Cash: ${formatINR(actualCash)}${shortage > 0 ? `\n⚠️ Shortage: ${formatINR(shortage)} added to debt` : "\n✅ No shortage"}`,
+      inlineKeyboard([
+        [{ text: "📝 New Settlement", callback_data: "new_settlement" }],
+        [{ text: "📊 Dashboard", callback_data: "dashboard" }],
+        [{ text: "🏠 Main Menu", callback_data: "main_menu" }],
+      ])
+    );
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : "Unknown error";
+    await sendMessage(
+      chatId,
+      `❌ <b>Settlement Failed</b>\n\n${errMsg}\n\nPlease try again.`,
+      mainMenuKeyboard()
     );
   }
-
-  await Settlement.create({
-    staff: staffId,
-    date: date ? new Date(date) : new Date(),
-    items: processedItems,
-    grossRevenue,
-    addPayment: addPayment || 0,
-    reducePayment: reducePayment || 0,
-    expenses: expenses || 0,
-    expectedCash,
-    actualCash: actualCash || 0,
-    shortage: shortage || 0,
-    notes: notes || "",
-    denominations: denominations || [],
-    denominationTotal: denominationTotal || 0,
-  });
-
-  // Update staff debt
-  if (shortage > 0) {
-    await Staff.findByIdAndUpdate(staffId, { $inc: { debtBalance: shortage } });
-  }
-
-  await clearSession(chatId);
-
-  await sendMessage(
-    chatId,
-    `✅ <b>Settlement Created!</b>\n\n💰 Revenue: ${formatINR(grossRevenue)}\n💵 Cash: ${formatINR(actualCash)}${shortage > 0 ? `\n⚠️ Shortage: ${formatINR(shortage)} added to debt` : "\n✅ No shortage"}`,
-    inlineKeyboard([
-      [{ text: "📝 New Settlement", callback_data: "new_settlement" }],
-      [{ text: "📊 Dashboard", callback_data: "dashboard" }],
-      [{ text: "🏠 Main Menu", callback_data: "main_menu" }],
-    ])
-  );
 }
 
 // ─── OCR / PHOTO HANDLERS ───────────────────────────────────
@@ -1205,7 +1287,7 @@ async function handlePhotoMessage(
     const imageBuffer = Buffer.from(await imageRes.arrayBuffer());
 
     // Run OCR
-    const result = await parseUPIScreenshot(imageBuffer);
+    const result = await parseUPIScreenshot(imageBuffer, contentType);
 
     if (!result) {
       await sendMessage(

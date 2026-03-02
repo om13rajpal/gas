@@ -37,7 +37,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 export async function parseUPIScreenshot(
-  imageBuffer: Buffer
+  imageBuffer: Buffer,
+  mimeType?: string
 ): Promise<UPIPaymentData | null> {
   if (!GEMINI_API_KEY) {
     console.error("GEMINI_API_KEY is not set");
@@ -53,7 +54,7 @@ export async function parseUPIScreenshot(
         PROMPT,
         {
           inlineData: {
-            mimeType: "image/png",
+            mimeType: mimeType || "image/png",
             data: imageBuffer.toString("base64"),
           },
         },

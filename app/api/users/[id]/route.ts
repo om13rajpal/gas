@@ -34,6 +34,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (body.email) update.email = body.email.toLowerCase();
     if (body.role) update.role = body.role;
     if (body.password) {
+      if (body.password.length < 6) {
+        return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
+      }
       update.password = await bcryptjs.hash(body.password, 12);
     }
 
@@ -58,9 +61,9 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       return NextResponse.json({ error: "Cannot delete your own account" }, { status: 400 });
     }
 
-    const user = await User.findByIdAndDelete(id);
+    const user = await User.findByIdAndUpdate(id, { isActive: false }, { new: true }).select("-password");
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
-    return NextResponse.json({ message: "User deleted" });
+    return NextResponse.json({ message: "User deactivated" });
   } catch (err) {
     console.error("User DELETE error:", err);
     return NextResponse.json({ error: "Failed to delete user" }, { status: 500 });
