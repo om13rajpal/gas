@@ -49,8 +49,8 @@ interface StaffEntryDisplay {
   staff: { _id: string; name: string; phone?: string };
   items: Array<{ cylinderSize: string; quantity: number; pricePerUnit: number; total: number }>;
   grossRevenue: number;
-  addOns: Array<{ category: string; amount: number }>;
-  deductions: Array<{ category: string; amount: number; debtorId?: { _id: string; name: string } | string; debtorName?: string }>;
+  addOns: Array<{ category: string; amount: number; description?: string }>;
+  deductions: Array<{ category: string; amount: number; description?: string; debtorId?: { _id: string; name: string } | string; debtorName?: string }>;
   totalAddOns: number;
   totalDeductions: number;
   amountExpected: number;
@@ -152,10 +152,11 @@ export default function SettlementDetailPage() {
             quantity: i.quantity,
             priceOverride: i.pricePerUnit,
           })),
-          addOns: e.addOns.map((a) => ({ category: a.category, amount: a.amount })),
+          addOns: e.addOns.map((a) => ({ category: a.category, amount: a.amount, description: a.description || "" })),
           deductions: e.deductions.map((d) => ({
             category: d.category,
             amount: d.amount,
+            description: d.description || "",
             debtorId: typeof d.debtorId === "object" && d.debtorId ? d.debtorId._id : d.debtorId as string | undefined,
             debtorName: d.debtorName,
           })),
@@ -211,8 +212,12 @@ export default function SettlementDetailPage() {
             quantity: i.quantity,
             priceOverride: i.priceOverride,
           })),
-          addOns: entry.addOns.filter((a) => a.category && a.amount > 0),
-          deductions: entry.deductions.filter((d) => d.category && d.amount > 0),
+          addOns: entry.addOns
+            .filter((a) => a.category && a.amount > 0)
+            .map((a) => ({ category: a.category, amount: a.amount, description: a.description || "" })),
+          deductions: entry.deductions
+            .filter((d) => d.category && d.amount > 0)
+            .map((d) => ({ category: d.category, amount: d.amount, description: d.description || "", debtorId: d.debtorId, debtorName: d.debtorName })),
           denominations: entry.denominations.filter((d) => d.count > 0),
           emptyCylindersReturned: entry.emptyCylindersReturned.filter((e) => e.quantity > 0),
           emptyShortage: entry.emptyShortage.filter((s) => s.shortQty > 0),
@@ -433,11 +438,16 @@ export default function SettlementDetailPage() {
                   {entry.addOns.length > 0 && (
                     <div>
                       <p className="text-sm font-medium text-emerald-600 mb-1">Add Ons ({formatCurrency(entry.totalAddOns)})</p>
-                      <div className="flex gap-2 flex-wrap">
+                      <div className="space-y-1">
                         {entry.addOns.map((a, i) => (
-                          <Badge key={i} variant="success" className="text-xs">
-                            {a.category}: {formatCurrency(a.amount)}
-                          </Badge>
+                          <div key={i} className="flex items-center gap-2">
+                            <Badge variant="success" className="text-xs">
+                              {a.category}: {formatCurrency(a.amount)}
+                            </Badge>
+                            {a.description && (
+                              <span className="text-xs text-zinc-500 italic">{a.description}</span>
+                            )}
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -447,16 +457,21 @@ export default function SettlementDetailPage() {
                   {entry.deductions.length > 0 && (
                     <div>
                       <p className="text-sm font-medium text-red-600 mb-1">Deductions ({formatCurrency(entry.totalDeductions)})</p>
-                      <div className="flex gap-2 flex-wrap">
+                      <div className="space-y-1">
                         {entry.deductions.map((d, i) => {
                           const debtorName = typeof d.debtorId === "object" && d.debtorId
                             ? d.debtorId.name
                             : d.debtorName;
                           return (
-                            <Badge key={i} variant="destructive" className="text-xs">
-                              {d.category}: {formatCurrency(d.amount)}
-                              {debtorName ? ` (${debtorName})` : ""}
-                            </Badge>
+                            <div key={i} className="flex items-center gap-2">
+                              <Badge variant="destructive" className="text-xs">
+                                {d.category}: {formatCurrency(d.amount)}
+                                {debtorName ? ` (${debtorName})` : ""}
+                              </Badge>
+                              {d.description && (
+                                <span className="text-xs text-zinc-500 italic">{d.description}</span>
+                              )}
+                            </div>
                           );
                         })}
                       </div>

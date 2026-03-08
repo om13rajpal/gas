@@ -18,6 +18,7 @@ import { formatCurrency } from "@/lib/utils";
 interface Deduction {
   category: string;
   amount: number;
+  description?: string;
   debtorId?: string;
   debtorName?: string;
 }
@@ -89,6 +90,15 @@ export function DeductionEntry({
                   value={deduction.amount || ""}
                   onChange={(e) => updateRow(idx, { amount: parseFloat(e.target.value) || 0 })}
                   placeholder="0"
+                />
+              </div>
+
+              <div className="flex-1 min-w-[120px] space-y-1">
+                <Label className="text-xs">Description</Label>
+                <Input
+                  value={deduction.description || ""}
+                  onChange={(e) => updateRow(idx, { description: e.target.value })}
+                  placeholder="Description (optional)"
                 />
               </div>
 

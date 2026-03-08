@@ -26,8 +26,8 @@ import { formatCurrency } from "@/lib/utils";
 interface StaffEntryData {
   staffId: string;
   items: Array<{ cylinderSize: string; quantity: number; priceOverride?: number }>;
-  addOns: Array<{ category: string; amount: number }>;
-  deductions: Array<{ category: string; amount: number; debtorId?: string; debtorName?: string }>;
+  addOns: Array<{ category: string; amount: number; description?: string }>;
+  deductions: Array<{ category: string; amount: number; description?: string; debtorId?: string; debtorName?: string }>;
   denominations: Array<{ note: number; count: number; total: number }>;
   emptyCylindersReturned: Array<{ cylinderSize: string; quantity: number }>;
   emptyShortage: Array<{ cylinderSize: string; shortQty: number; debtorId?: string; debtorName?: string }>;

@@ -239,8 +239,12 @@ export default function NewSettlementPage() {
                 quantity: i.quantity,
                 priceOverride: i.priceOverride,
               })),
-            addOns: entry.addOns.filter((a) => a.category && a.amount > 0),
-            deductions: entry.deductions.filter((d) => d.category && d.amount > 0),
+            addOns: entry.addOns
+              .filter((a) => a.category && a.amount > 0)
+              .map((a) => ({ category: a.category, amount: a.amount, description: a.description || "" })),
+            deductions: entry.deductions
+              .filter((d) => d.category && d.amount > 0)
+              .map((d) => ({ category: d.category, amount: d.amount, description: d.description || "", debtorId: d.debtorId, debtorName: d.debtorName })),
             denominations: entry.denominations.filter((d) => d.count > 0),
             emptyCylindersReturned: entry.emptyCylindersReturned.filter((e) => e.quantity > 0),
             emptyShortage: entry.emptyShortage.filter((s) => s.shortQty > 0),

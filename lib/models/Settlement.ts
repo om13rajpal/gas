@@ -81,11 +81,13 @@ export interface ISettlement extends Document {
 export interface IAddOn {
   category: string;
   amount: number;
+  description?: string;
 }
 
 export interface IDeduction {
   category: string;
   amount: number;
+  description?: string;
   debtorId?: Types.ObjectId;
   debtorName?: string;
 }
@@ -178,6 +180,7 @@ const AddOnSchema = new Schema<IAddOn>(
   {
     category: { type: String, required: true },
     amount: { type: Number, required: true },
+    description: { type: String, default: "" },
   },
   { _id: false }
 );
@@ -186,6 +189,7 @@ const DeductionSchema = new Schema<IDeduction>(
   {
     category: { type: String, required: true },
     amount: { type: Number, required: true },
+    description: { type: String, default: "" },
     debtorId: { type: Schema.Types.ObjectId, ref: "Customer" },
     debtorName: { type: String },
   },

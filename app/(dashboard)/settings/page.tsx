@@ -29,8 +29,15 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Flame, Plus, Pencil, Trash2, Loader2 } from "lucide-react";
 import { toast } from "@/lib/use-toast";
+
+interface CategoryRecord {
+  _id: string;
+  name: string;
+  type: "addon" | "deduction";
+}
 
 interface UserRecord {
   _id: string;
@@ -50,6 +57,88 @@ export default function SettingsPage() {
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "manager" });
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  // Category state
+  const [categories, setCategories] = useState<CategoryRecord[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
+  const [catDialogOpen, setCatDialogOpen] = useState(false);
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [catForm, setCatForm] = useState({ name: "", type: "addon" as "addon" | "deduction" });
+  const [savingCat, setSavingCat] = useState(false);
+  const [deleteCatConfirm, setDeleteCatConfirm] = useState<string | null>(null);
+  const [deleteCatError, setDeleteCatError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"addon" | "deduction">("addon");
+
+  const fetchCategories = () => {
+    setLoadingCategories(true);
+    fetch("/api/categories")
+      .then((r) => r.json())
+      .then((data) => setCategories(data.categories || []))
+      .finally(() => setLoadingCategories(false));
+  };
+
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  const handleCatSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingCat(true);
+
+    if (editingCatId) {
+      const res = await fetch(`/api/categories/${editingCatId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: catForm.name }),
+      });
+      if (res.ok) {
+        toast({ title: "Category renamed", variant: "success" });
+      } else {
+        const data = await res.json();
+        toast({ title: "Error", description: data.error, variant: "destructive" });
+      }
+    } else {
+      const res = await fetch("/api/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: catForm.name, type: catForm.type }),
+      });
+      if (res.ok) {
+        toast({ title: "Category created", variant: "success" });
+      } else {
+        const data = await res.json();
+        toast({ title: "Error", description: data.error, variant: "destructive" });
+      }
+    }
+
+    setCatDialogOpen(false);
+    setEditingCatId(null);
+    setCatForm({ name: "", type: activeTab });
+    setSavingCat(false);
+    fetchCategories();
+  };
+
+  const handleCatEdit = (cat: CategoryRecord) => {
+    setEditingCatId(cat._id);
+    setCatForm({ name: cat.name, type: cat.type });
+    setCatDialogOpen(true);
+  };
+
+  const handleCatDelete = async (id: string) => {
+    setDeleteCatError(null);
+    const res = await fetch(`/api/categories/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      toast({ title: "Category deleted", variant: "success" });
+      setDeleteCatConfirm(null);
+      fetchCategories();
+    } else {
+      const data = await res.json();
+      setDeleteCatError(data.error || "Failed to delete");
+    }
+  };
+
+  const addonCategories = categories.filter((c) => c.type === "addon");
+  const deductionCategories = categories.filter((c) => c.type === "deduction");
 
   const fetchUsers = () => {
     if (!isAdmin) return;
@@ -157,7 +246,7 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between py-2 border-b border-zinc-100 dark:border-zinc-800">
             <span className="text-sm text-zinc-500">Application</span>
             <span className="text-sm font-medium flex items-center gap-2">
-              <Flame className="h-3 w-3" /> Gobind Bharat Gas V5
+              <Flame className="h-3 w-3" /> Gobind Bharat Gas V6
             </span>
           </div>
           <div className="flex items-center justify-between py-2 border-b border-zinc-100 dark:border-zinc-800">
@@ -247,6 +336,188 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Category Management */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base">Category Management</CardTitle>
+              <CardDescription>Manage add-on and deduction categories</CardDescription>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditingCatId(null);
+                setCatForm({ name: "", type: activeTab });
+                setCatDialogOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              Add Category
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "addon" | "deduction")} className="w-full">
+            <div className="px-6 pt-2">
+              <TabsList>
+                <TabsTrigger value="addon">Add Ons</TabsTrigger>
+                <TabsTrigger value="deduction">Deductions</TabsTrigger>
+              </TabsList>
+            </div>
+            <TabsContent value="addon" className="mt-0">
+              {loadingCategories ? (
+                <div className="p-6 text-center text-zinc-500">Loading categories...</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {addonCategories.map((cat) => (
+                      <TableRow key={cat._id}>
+                        <TableCell className="font-medium">{cat.name}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => handleCatEdit(cat)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-red-600 hover:text-red-700"
+                              onClick={() => { setDeleteCatConfirm(cat._id); setDeleteCatError(null); }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {addonCategories.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={2} className="text-center py-8 text-zinc-500">
+                          No add-on categories
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </TabsContent>
+            <TabsContent value="deduction" className="mt-0">
+              {loadingCategories ? (
+                <div className="p-6 text-center text-zinc-500">Loading categories...</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {deductionCategories.map((cat) => (
+                      <TableRow key={cat._id}>
+                        <TableCell className="font-medium">{cat.name}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => handleCatEdit(cat)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-red-600 hover:text-red-700"
+                              onClick={() => { setDeleteCatConfirm(cat._id); setDeleteCatError(null); }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {deductionCategories.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={2} className="text-center py-8 text-zinc-500">
+                          No deduction categories
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      {/* Add/Edit Category Dialog */}
+      <Dialog open={catDialogOpen} onOpenChange={setCatDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingCatId ? "Rename Category" : "Add New Category"}</DialogTitle>
+            <DialogDescription>
+              {editingCatId
+                ? "Renaming will update all existing settlements using this category."
+                : `Create a new ${activeTab === "addon" ? "add-on" : "deduction"} category`}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCatSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name *</Label>
+              <Input
+                value={catForm.name}
+                onChange={(e) => setCatForm({ ...catForm, name: e.target.value })}
+                required
+                placeholder="Category name"
+              />
+            </div>
+            {!editingCatId && (
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <Badge variant="secondary" className="capitalize">{activeTab === "addon" ? "Add On" : "Deduction"}</Badge>
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setCatDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={savingCat}>
+                {savingCat ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {editingCatId ? "Rename" : "Create"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Category Confirmation */}
+      <Dialog open={!!deleteCatConfirm} onOpenChange={() => { setDeleteCatConfirm(null); setDeleteCatError(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Category</DialogTitle>
+            <DialogDescription>
+              Are you sure? This category will be permanently removed.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteCatError && (
+            <p className="text-sm text-red-600 bg-red-50 dark:bg-red-950/20 p-3 rounded-lg">
+              {deleteCatError}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => { setDeleteCatConfirm(null); setDeleteCatError(null); }}>Cancel</Button>
+            <Button variant="destructive" onClick={() => deleteCatConfirm && handleCatDelete(deleteCatConfirm)}>
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Add/Edit User Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

@@ -63,10 +63,11 @@ interface StaffEntryInput {
     quantity: number;
     priceOverride?: number;
   }>;
-  addOns: Array<{ category: string; amount: number }>;
+  addOns: Array<{ category: string; amount: number; description?: string }>;
   deductions: Array<{
     category: string;
     amount: number;
+    description?: string;
     debtorId?: string;
     debtorName?: string;
   }>;
@@ -158,8 +159,12 @@ export async function POST(request: Request) {
         }
 
         // Compute settlement figures
-        const validAddOns = entry.addOns.filter(a => a.category && a.amount > 0);
-        const validDeductions = entry.deductions.filter(d => d.category && d.amount > 0);
+        const validAddOns = entry.addOns
+          .filter(a => a.category && a.amount > 0)
+          .map(a => ({ category: a.category, amount: a.amount, description: a.description || "" }));
+        const validDeductions = entry.deductions
+          .filter(d => d.category && d.amount > 0)
+          .map(d => ({ category: d.category, amount: d.amount, description: d.description || "", debtorId: d.debtorId, debtorName: d.debtorName }));
         const validDenominations = entry.denominations.filter(d => d.count > 0);
 
         const computed = computeStaffEntry(
@@ -221,6 +226,7 @@ export async function POST(request: Request) {
           deductions: validDeductions.map(d => ({
             category: d.category,
             amount: d.amount,
+            description: d.description || "",
             debtorId: d.debtorId || undefined,
             debtorName: d.debtorName || undefined,
           })),
