@@ -4,183 +4,141 @@ import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   BarChart3,
-  Download,
   Calendar,
   TrendingUp,
   TrendingDown,
-  AlertTriangle,
-  Package,
-  FileText,
-  IndianRupee,
-  PlusCircle,
-  Search,
+  ChevronLeft,
+  ChevronRight,
+  BookOpen,
+  Users,
+  Minus,
+  Banknote,
+  User,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
-import { StatCard } from "@/components/ui/stat-card";
 import { sectionThemes } from "@/lib/theme";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency } from "@/lib/utils";
 import { staggerContainer, fadeUpItem } from "@/lib/animations";
 
-interface ReportSummary {
-  totalSettlements: number;
-  totalRevenue: number;
-  totalAddOns: number;
-  totalDeductions: number;
-  totalAmountPending: number;
-  totalActualCash: number;
-  totalDeliveries: number;
-}
-
-interface StaffBreakdownItem {
-  staffId: string;
-  staffName: string;
-  settlementCount: number;
-  totalRevenue: number;
-  totalAddOns: number;
-  totalDeductions: number;
-  totalDeliveries: number;
-}
-
-interface CylinderBreakdownItem {
+interface CylinderSale {
   cylinderSize: string;
-  totalQuantity: number;
-  totalRevenue: number;
+  quantity: number;
+  pricePerUnit: number;
+  total: number;
 }
 
-interface DailyTrendItem {
-  date: string;
-  revenue: number;
-  deliveries: number;
-  settlements: number;
-}
-
-interface AddonDeductionItem {
+interface LedgerItem {
   category: string;
-  type: string;
-  totalAmount: number;
-  count: number;
-}
-
-interface EmptyReconciliationItem {
-  cylinderSize: string;
-  issued: number;
-  expected: number;
-  returned: number;
-  mismatch: number;
-}
-
-interface ReportData {
-  summary: ReportSummary;
-  staffBreakdown: StaffBreakdownItem[];
-  cylinderBreakdown: CylinderBreakdownItem[];
-  dailyTrends: DailyTrendItem[];
-  addonDeductionBreakdown?: AddonDeductionItem[];
-  emptyReconciliationSummary?: EmptyReconciliationItem[];
-}
-
-interface CategoryReportItem {
-  date: string;
-  staffName: string;
   amount: number;
-  type: "addon" | "deduction";
+  description?: string;
 }
 
-interface CategoryOption {
-  _id: string;
-  name: string;
-  type: string;
+interface Denomination {
+  note: number;
+  count: number;
+  total: number;
 }
 
-function formatDateStr(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("en-IN", {
+interface StaffEntry {
+  staffName: string;
+  items: CylinderSale[];
+  grossRevenue: number;
+  addOns: LedgerItem[];
+  deductions: LedgerItem[];
+  totalAddOns: number;
+  totalDeductions: number;
+  amountExpected: number;
+  denominations: Denomination[];
+  denominationTotal: number;
+  cashDifference: number;
+}
+
+interface DailyReport {
+  date: string;
+  cylinderSales: CylinderSale[];
+  additionalItems: LedgerItem[];
+  expenses: LedgerItem[];
+  grossCylinderRevenue: number;
+  totalAdditionalIncome: number;
+  grossTotal: number;
+  totalExpenses: number;
+  netAmount: number;
+  staffNames: string[];
+  staffEntries?: StaffEntry[];
+}
+
+function formatDateHeader(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-IN", {
+    weekday: "short",
     day: "2-digit",
     month: "short",
     year: "numeric",
   });
 }
 
+function formatNum(n: number): string {
+  return new Intl.NumberFormat("en-IN").format(n);
+}
+
 function toInputDate(date: Date): string {
   return date.toISOString().split("T")[0];
 }
 
+function aggregateByCategory(items: LedgerItem[]): LedgerItem[] {
+  const map = new Map<string, number>();
+  for (const item of items) {
+    map.set(item.category, (map.get(item.category) || 0) + item.amount);
+  }
+  return Array.from(map.entries()).map(([category, amount]) => ({
+    category,
+    amount,
+  }));
+}
+
 export default function ReportsPage() {
-  const [data, setData] = useState<ReportData | null>(null);
+  const [dailyReports, setDailyReports] = useState<DailyReport[]>([]);
   const [loading, setLoading] = useState(true);
 
   const today = new Date();
-  const thirtyDaysAgo = new Date(new Date().setDate(today.getDate() - 30));
 
-  const [startDate, setStartDate] = useState(toInputDate(thirtyDaysAgo));
+  const [startDate, setStartDate] = useState(toInputDate(today));
   const [endDate, setEndDate] = useState(toInputDate(today));
+  const [activePreset, setActivePreset] = useState<string>("today");
 
-  // Category report state
-  const [categories, setCategories] = useState<CategoryOption[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState("");
-  const [categoryResults, setCategoryResults] = useState<CategoryReportItem[]>([]);
-  const [categoryLoading, setCategoryLoading] = useState(false);
-
-  const fetchReport = useCallback(async (start: string, end: string) => {
+  const fetchDailyReports = useCallback(async (start: string, end: string) => {
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/reports?startDate=${start}&endDate=${end}`
+        `/api/reports/daily?startDate=${start}&endDate=${end}`
       );
       const json = await res.json();
-      setData(json);
+      setDailyReports(json.dailyReports || []);
     } catch (err) {
-      console.error("Failed to fetch report:", err);
+      console.error("Failed to fetch daily reports:", err);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchReport(startDate, endDate);
-    // Load categories
-    fetch("/api/categories")
-      .then((r) => r.json())
-      .then((json) => setCategories(json.categories || []))
-      .catch(() => {});
+    fetchDailyReports(startDate, endDate);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleApply = () => {
-    fetchReport(startDate, endDate);
-  };
-
-  const fetchCategoryReport = async () => {
-    if (!selectedCategory) return;
-    setCategoryLoading(true);
-    try {
-      const res = await fetch(
-        `/api/reports/category?category=${encodeURIComponent(selectedCategory)}&startDate=${startDate}&endDate=${endDate}`
-      );
-      const json = await res.json();
-      setCategoryResults(json.results || []);
-    } catch (err) {
-      console.error("Failed to fetch category report:", err);
-    } finally {
-      setCategoryLoading(false);
-    }
+    setActivePreset("");
+    fetchDailyReports(startDate, endDate);
   };
 
   const setPreset = (preset: "today" | "7days" | "30days" | "thisMonth") => {
     const now = new Date();
     let start: Date;
-    let end: Date = now;
+    const end: Date = now;
 
     switch (preset) {
       case "today":
@@ -201,608 +159,557 @@ export default function ReportsPage() {
     const e = toInputDate(end);
     setStartDate(s);
     setEndDate(e);
-    fetchReport(s, e);
+    setActivePreset(preset);
+    fetchDailyReports(s, e);
   };
 
-  const exportCSV = () => {
-    if (!data) return;
-
-    const headers = [
-      "Date",
-      "Staff",
-      "Cylinder Sizes",
-      "Revenue",
-      "Add Ons",
-      "Deductions",
-      "Actual Cash",
-      "Amount Pending",
-    ];
-
-    const rows: string[][] = [];
-
-    rows.push(["--- Staff Summary ---", "", "", "", "", "", "", ""]);
-    data.staffBreakdown.forEach((staff) => {
-      rows.push([
-        "",
-        staff.staffName,
-        `${staff.totalDeliveries} cylinders`,
-        staff.totalRevenue.toString(),
-        (staff.totalAddOns ?? 0).toString(),
-        (staff.totalDeductions ?? 0).toString(),
-        "",
-        "",
-      ]);
-    });
-
-    rows.push(["", "", "", "", "", "", "", ""]);
-    rows.push(["--- Daily Trends ---", "", "", "", "", "", "", ""]);
-    data.dailyTrends.forEach((day) => {
-      rows.push([
-        day.date,
-        "",
-        `${day.deliveries} deliveries`,
-        day.revenue.toString(),
-        "",
-        "",
-        "",
-        "",
-      ]);
-    });
-
-    rows.push(["", "", "", "", "", "", "", ""]);
-    rows.push(["--- Cylinder Breakdown ---", "", "", "", "", "", "", ""]);
-    data.cylinderBreakdown.forEach((cyl) => {
-      rows.push([
-        "",
-        "",
-        `${cyl.cylinderSize} x ${cyl.totalQuantity}`,
-        cyl.totalRevenue.toString(),
-        "",
-        "",
-        "",
-        "",
-      ]);
-    });
-
-    if (data.addonDeductionBreakdown && data.addonDeductionBreakdown.length > 0) {
-      rows.push(["", "", "", "", "", "", "", ""]);
-      rows.push(["--- Add On / Deduction Breakdown ---", "", "", "", "", "", "", ""]);
-      rows.push(["Category", "Type", "", "Total Amount", "Count", "", "", ""]);
-      data.addonDeductionBreakdown.forEach((t) => {
-        rows.push([
-          t.category,
-          t.type,
-          "",
-          t.totalAmount.toString(),
-          t.count.toString(),
-          "",
-          "",
-          "",
-        ]);
-      });
-    }
-
-    rows.push(["", "", "", "", "", "", "", ""]);
-    rows.push([
-      "TOTAL",
-      "",
-      `${data.summary.totalDeliveries} deliveries`,
-      data.summary.totalRevenue.toString(),
-      (data.summary.totalAddOns ?? 0).toString(),
-      (data.summary.totalDeductions ?? 0).toString(),
-      (data.summary.totalActualCash ?? 0).toString(),
-      (data.summary.totalAmountPending ?? 0).toString(),
-    ]);
-
-    const csvContent = [
-      headers.join(","),
-      ...rows.map((row) =>
-        row.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(",")
-      ),
-    ].join("\n");
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `report_${startDate}_to_${endDate}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+  const navigateDays = (direction: number) => {
+    const daysDiff =
+      Math.ceil(
+        (new Date(endDate).getTime() - new Date(startDate).getTime()) /
+          (1000 * 60 * 60 * 24)
+      ) + 1;
+    const shift = daysDiff * direction;
+    const newStart = new Date(startDate);
+    const newEnd = new Date(endDate);
+    newStart.setDate(newStart.getDate() + shift);
+    newEnd.setDate(newEnd.getDate() + shift);
+    const s = toInputDate(newStart);
+    const e = toInputDate(newEnd);
+    setStartDate(s);
+    setEndDate(e);
+    setActivePreset("");
+    fetchDailyReports(s, e);
   };
 
-  const summary = data?.summary;
-
-  const statCards = [
-    {
-      title: "Total Revenue",
-      value: formatCurrency(summary?.totalRevenue || 0),
-      icon: TrendingUp,
-      color: "text-emerald-600",
-      bg: "bg-emerald-50 dark:bg-emerald-900/20",
-    },
-    {
-      title: "Total Add Ons",
-      value: formatCurrency(summary?.totalAddOns || 0),
-      icon: PlusCircle,
-      color: "text-sky-600",
-      bg: "bg-sky-50 dark:bg-sky-900/20",
-    },
-    {
-      title: "Total Deductions",
-      value: formatCurrency(summary?.totalDeductions || 0),
-      icon: TrendingDown,
-      color: "text-amber-600",
-      bg: "bg-amber-50 dark:bg-amber-900/20",
-    },
-    {
-      title: "Amount Pending",
-      value: formatCurrency(summary?.totalAmountPending || 0),
-      icon: AlertTriangle,
-      color: "text-red-600",
-      bg: "bg-red-50 dark:bg-red-900/20",
-    },
-    {
-      title: "Total Deliveries",
-      value: summary?.totalDeliveries || 0,
-      suffix: "cylinders",
-      icon: Package,
-      color: "text-blue-600",
-      bg: "bg-blue-50 dark:bg-blue-900/20",
-    },
-    {
-      title: "Total Settlements",
-      value: summary?.totalSettlements || 0,
-      suffix: "records",
-      icon: FileText,
-      color: "text-violet-600",
-      bg: "bg-violet-50 dark:bg-violet-900/20",
-    },
-  ];
+  // Period totals
+  const periodTotals = dailyReports.reduce(
+    (acc, r) => ({
+      grossRevenue: acc.grossRevenue + r.grossCylinderRevenue,
+      addOns: acc.addOns + r.totalAdditionalIncome,
+      expenses: acc.expenses + r.totalExpenses,
+      net: acc.net + r.netAmount,
+      cylinders:
+        acc.cylinders +
+        r.cylinderSales.reduce((s, c) => s + c.quantity, 0),
+    }),
+    { grossRevenue: 0, addOns: 0, expenses: 0, net: 0, cylinders: 0 }
+  );
 
   if (loading) {
     return (
       <div className="space-y-6">
         <PageHeader
-          icon={<BarChart3 className="h-5 w-5" />}
-          title="Reports"
-          subtitle="Settlement reports and analytics"
+          icon={<BookOpen className="h-5 w-5" />}
+          title="Daily Khata"
+          subtitle="Daily settlement ledger"
           gradient={sectionThemes.reports.gradient}
         />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[...Array(6)].map((_, i) => (
-            <Skeleton key={i} className="h-32 rounded-xl" />
+        <div className="space-y-4">
+          {[...Array(3)].map((_, i) => (
+            <Skeleton key={i} className="h-64 rounded-xl" />
           ))}
         </div>
-        <Skeleton className="h-64 rounded-xl" />
-        <Skeleton className="h-64 rounded-xl" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-4 sm:space-y-6">
       <PageHeader
-        icon={<BarChart3 className="h-5 w-5" />}
-        title="Reports"
-        subtitle="Settlement reports and analytics"
+        icon={<BookOpen className="h-5 w-5" />}
+        title="Daily Khata"
+        subtitle="Daily settlement ledger"
         gradient={sectionThemes.reports.gradient}
-        actions={
-          <Button onClick={exportCSV} variant="outline" className="gap-2">
-            <Download className="h-4 w-4" />
-            Export CSV
-          </Button>
-        }
       />
 
-      {/* Date Range Picker */}
+      {/* Date Controls */}
       <Card>
-        <CardContent className="p-5">
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-end gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="startDate" className="text-sm">
-                  Start Date
-                </Label>
-                <div className="relative">
-                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
-                  <Input
-                    id="startDate"
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="pl-10 w-[170px]"
-                  />
-                </div>
+        <CardContent className="p-3 sm:p-5">
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                className="shrink-0 h-9 w-9"
+                onClick={() => navigateDays(-1)}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <div className="flex flex-1 items-center gap-2 min-w-0">
+                <Input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="flex-1 min-w-0 text-sm h-9"
+                />
+                <span className="text-zinc-400 text-sm shrink-0">to</span>
+                <Input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="flex-1 min-w-0 text-sm h-9"
+                />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="endDate" className="text-sm">
-                  End Date
-                </Label>
-                <div className="relative">
-                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
-                  <Input
-                    id="endDate"
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="pl-10 w-[170px]"
-                  />
-                </div>
-              </div>
-              <Button onClick={handleApply} className="gap-2">
-                <BarChart3 className="h-4 w-4" />
-                Apply
+              <Button
+                variant="outline"
+                size="icon"
+                className="shrink-0 h-9 w-9"
+                onClick={() => navigateDays(1)}
+              >
+                <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
-            <div className="flex flex-wrap gap-2">
+
+            <div className="flex flex-wrap gap-1.5 sm:gap-2">
+              {(["today", "7days", "30days", "thisMonth"] as const).map((preset) => {
+                const labels = { today: "Today", "7days": "7 Days", "30days": "30 Days", thisMonth: "This Month" };
+                return (
+                  <Button
+                    key={preset}
+                    variant={activePreset === preset ? "default" : "outline"}
+                    size="sm"
+                    className="text-xs h-7 px-2 sm:text-sm sm:h-8 sm:px-3"
+                    onClick={() => setPreset(preset)}
+                  >
+                    {labels[preset]}
+                  </Button>
+                );
+              })}
               <Button
-                variant="outline"
                 size="sm"
-                onClick={() => setPreset("today")}
+                className="text-xs h-7 px-2 sm:text-sm sm:h-8 sm:px-3 ml-auto"
+                onClick={handleApply}
               >
-                Today
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPreset("7days")}
-              >
-                Last 7 Days
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPreset("30days")}
-              >
-                Last 30 Days
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPreset("thisMonth")}
-              >
-                This Month
+                <BarChart3 className="h-3.5 w-3.5 mr-1" />
+                Go
               </Button>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Summary Cards */}
-      <motion.div
-        variants={staggerContainer}
-        initial="hidden"
-        animate="show"
-        className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
-      >
-        {statCards.map((card) => (
-          <motion.div key={card.title} variants={fadeUpItem}>
-            <StatCard
-              icon={<card.icon className="h-5 w-5" />}
-              label={card.title}
-              value={"suffix" in card && card.suffix ? `${card.value} ${card.suffix}` : card.value}
-              iconBg={card.bg}
-              iconColor={card.color}
-            />
-          </motion.div>
-        ))}
-      </motion.div>
-
-      {/* Staff Performance Table */}
-      <motion.div variants={fadeUpItem} initial="hidden" animate="show">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Staff Performance</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {data?.staffBreakdown && data.staffBreakdown.length > 0 ? (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead className="text-right">Settlements</TableHead>
-                      <TableHead className="text-right">Revenue</TableHead>
-                      <TableHead className="text-right">Add Ons</TableHead>
-                      <TableHead className="text-right">Deductions</TableHead>
-                      <TableHead className="text-right">Deliveries</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.staffBreakdown.map((staff) => (
-                      <TableRow key={staff.staffId}>
-                        <TableCell className="font-medium">
-                          {staff.staffName}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Badge variant="secondary">
-                            {staff.settlementCount}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right text-emerald-600 font-medium">
-                          {formatCurrency(staff.totalRevenue)}
-                        </TableCell>
-                        <TableCell className="text-right text-sky-600">
-                          {formatCurrency(staff.totalAddOns ?? 0)}
-                        </TableCell>
-                        <TableCell className="text-right text-amber-600">
-                          {formatCurrency(staff.totalDeductions ?? 0)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {staff.totalDeliveries}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <p className="text-sm text-zinc-500 text-center py-8">
-                No staff data for the selected period.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* Add On / Deduction Breakdown */}
-      {data?.addonDeductionBreakdown && data.addonDeductionBreakdown.length > 0 && (
-        <motion.div variants={fadeUpItem} initial="hidden" animate="show">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Add On / Deduction Breakdown</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead className="text-right">Total Amount</TableHead>
-                      <TableHead className="text-right">Count</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.addonDeductionBreakdown.map((t, i) => (
-                      <TableRow key={i}>
-                        <TableCell className="font-medium">{t.category}</TableCell>
-                        <TableCell>
-                          <Badge variant={t.type === "addon" ? "success" : "destructive"}>
-                            {t.type === "addon" ? "Add On" : "Deduction"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {formatCurrency(t.totalAmount)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Badge variant="secondary">{t.count}</Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+      {/* Period Summary Bar */}
+      {dailyReports.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+          <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-2.5 sm:p-3">
+            <p className="text-[10px] sm:text-xs text-zinc-400 uppercase tracking-wider font-semibold">Revenue</p>
+            <p className="text-sm sm:text-lg font-bold text-emerald-600 mt-0.5">
+              {formatCurrency(periodTotals.grossRevenue)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-2.5 sm:p-3">
+            <p className="text-[10px] sm:text-xs text-zinc-400 uppercase tracking-wider font-semibold">Add Ons</p>
+            <p className="text-sm sm:text-lg font-bold text-blue-600 mt-0.5">
+              {formatCurrency(periodTotals.addOns)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-2.5 sm:p-3">
+            <p className="text-[10px] sm:text-xs text-zinc-400 uppercase tracking-wider font-semibold">Expenses</p>
+            <p className="text-sm sm:text-lg font-bold text-red-600 mt-0.5">
+              {formatCurrency(periodTotals.expenses)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-2.5 sm:p-3">
+            <p className="text-[10px] sm:text-xs text-zinc-400 uppercase tracking-wider font-semibold">Cylinders</p>
+            <p className="text-sm sm:text-lg font-bold mt-0.5">
+              {formatNum(periodTotals.cylinders)}
+            </p>
+          </div>
+        </div>
       )}
 
-      {/* Category Report */}
-      <motion.div variants={fadeUpItem} initial="hidden" animate="show">
+      {/* Daily Ledger Entries */}
+      {dailyReports.length === 0 ? (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Category Report</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap items-end gap-4 mb-4">
-              <div className="space-y-1.5">
-                <Label className="text-sm">Category</Label>
-                <select
-                  className="flex h-9 w-[200px] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                >
-                  <option value="">Select category...</option>
-                  {categories.map((c) => (
-                    <option key={c._id} value={c.name}>
-                      {c.name} ({c.type})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <Button
-                onClick={fetchCategoryReport}
-                disabled={!selectedCategory || categoryLoading}
-                className="gap-2"
+          <CardContent className="py-12 text-center">
+            <BookOpen className="h-10 w-10 mx-auto mb-3 text-zinc-300" />
+            <p className="text-zinc-500 text-sm">
+              No settlements found for this period.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <motion.div
+          variants={staggerContainer}
+          initial="hidden"
+          animate="show"
+          className="space-y-4"
+        >
+          {dailyReports.map((report) => (
+            <DailyLedgerCard key={report.date} report={report} />
+          ))}
+        </motion.div>
+      )}
+    </div>
+  );
+}
+
+// ─── Daily Ledger Card Component ───
+
+function DailyLedgerCard({ report }: { report: DailyReport }) {
+  const [expanded, setExpanded] = useState(true);
+  const aggExpenses = aggregateByCategory(report.expenses);
+  const aggAddOns = aggregateByCategory(report.additionalItems);
+  const totalCylinders = report.cylinderSales.reduce(
+    (s, c) => s + c.quantity,
+    0
+  );
+  const hasMultipleStaff = (report.staffEntries?.length || 0) > 1;
+
+  return (
+    <motion.div variants={fadeUpItem}>
+      <Card className="overflow-hidden">
+        {/* Date Header */}
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center justify-between px-3 sm:px-5 py-3 bg-gradient-to-r from-zinc-50 to-zinc-100/50 dark:from-zinc-900 dark:to-zinc-900/50 border-b border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors"
+        >
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400 shrink-0">
+              <Calendar className="h-4 w-4" />
+            </div>
+            <div className="text-left min-w-0">
+              <p className="font-bold text-sm sm:text-base truncate">
+                {formatDateHeader(report.date)}
+              </p>
+              {report.staffNames.length > 0 && (
+                <p className="text-[11px] sm:text-xs text-zinc-400 truncate">
+                  <Users className="h-3 w-3 inline mr-1" />
+                  {report.staffNames.join(", ")}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="text-right">
+              <p className="text-xs text-zinc-400">Net</p>
+              <p
+                className={`text-sm sm:text-base font-bold ${
+                  report.netAmount >= 0 ? "text-emerald-600" : "text-red-600"
+                }`}
               >
-                <Search className="h-4 w-4" />
-                {categoryLoading ? "Loading..." : "Search"}
-              </Button>
+                {formatCurrency(report.netAmount)}
+              </p>
+            </div>
+            <ChevronRight
+              className={`h-4 w-4 text-zinc-400 transition-transform ${
+                expanded ? "rotate-90" : ""
+              }`}
+            />
+          </div>
+        </button>
+
+        {expanded && (
+          <CardContent className="p-0">
+            {/* Day Summary: Sales | Expenses */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-zinc-200 dark:divide-zinc-800">
+              {/* LEFT: Sales & Income */}
+              <div className="p-3 sm:p-4 space-y-2">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
+                  <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wider">
+                    Sales & Income
+                  </p>
+                </div>
+
+                {/* Additional Items */}
+                {aggAddOns.length > 0 && (
+                  <div className="space-y-1">
+                    {aggAddOns.map((item, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm">
+                        <span className="text-zinc-600 dark:text-zinc-400 truncate mr-2">
+                          {item.category}
+                        </span>
+                        <span className="font-medium text-blue-600 tabular-nums shrink-0">
+                          {formatNum(item.amount)}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="border-b border-dashed border-zinc-200 dark:border-zinc-700 my-1" />
+                  </div>
+                )}
+
+                {/* Cylinder Sales */}
+                {report.cylinderSales.map((cyl, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm">
+                    <span className="text-zinc-600 dark:text-zinc-400 tabular-nums">
+                      <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                        {cyl.quantity}
+                      </span>
+                      <span className="mx-1 text-zinc-400">&times;</span>
+                      <span>{formatNum(cyl.pricePerUnit)}</span>
+                    </span>
+                    <span className="font-semibold tabular-nums shrink-0">
+                      {formatNum(cyl.total)}
+                    </span>
+                  </div>
+                ))}
+
+                {/* Totals */}
+                <div className="border-t border-zinc-200 dark:border-zinc-700 pt-2 space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500">Gross Total</span>
+                    <span className="font-bold tabular-nums">{formatNum(report.grossTotal)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm text-red-600">
+                    <span className="flex items-center gap-1">
+                      <Minus className="h-3 w-3" />
+                      Expenses
+                    </span>
+                    <span className="font-bold tabular-nums">{formatNum(report.totalExpenses)}</span>
+                  </div>
+                  <div className="border-t border-zinc-300 dark:border-zinc-600 pt-1.5">
+                    <div className="flex justify-between text-sm sm:text-base">
+                      <span className="font-bold">Net Amount</span>
+                      <span
+                        className={`font-bold tabular-nums ${
+                          report.netAmount >= 0 ? "text-emerald-600" : "text-red-600"
+                        }`}
+                      >
+                        {formatCurrency(report.netAmount)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* RIGHT: Expenses */}
+              <div className="p-3 sm:p-4 space-y-2">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <TrendingDown className="h-3.5 w-3.5 text-red-500" />
+                  <p className="text-xs font-semibold text-red-600 uppercase tracking-wider">
+                    Expenses
+                  </p>
+                </div>
+
+                {aggExpenses.length > 0 ? (
+                  <>
+                    {aggExpenses.map((exp, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm">
+                        <span className="text-zinc-600 dark:text-zinc-400 truncate mr-2">
+                          {exp.category}
+                        </span>
+                        <span className="font-medium text-red-600 tabular-nums shrink-0">
+                          {formatNum(exp.amount)}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="border-t border-zinc-200 dark:border-zinc-700 pt-2">
+                      <div className="flex justify-between text-sm font-bold">
+                        <span>Total</span>
+                        <span className="text-red-600 tabular-nums">
+                          {formatNum(report.totalExpenses)}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-zinc-400 italic">No expenses recorded</p>
+                )}
+
+                {/* Cylinder summary badges */}
+                <div className="pt-2 flex flex-wrap gap-1.5">
+                  <Badge variant="outline" className="text-xs">
+                    {totalCylinders} cylinders
+                  </Badge>
+                  {(() => {
+                    const sizeMap = new Map<string, number>();
+                    for (const cyl of report.cylinderSales) {
+                      sizeMap.set(cyl.cylinderSize, (sizeMap.get(cyl.cylinderSize) || 0) + cyl.quantity);
+                    }
+                    return Array.from(sizeMap.entries()).map(([size, qty]) => (
+                      <Badge key={size} variant="secondary" className="text-xs">
+                        {size}: {qty}
+                      </Badge>
+                    ));
+                  })()}
+                </div>
+              </div>
             </div>
 
-            {categoryResults.length > 0 ? (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Delivery Man</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                      <TableHead>Type</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {categoryResults.map((item, i) => (
-                      <TableRow key={i}>
-                        <TableCell>{formatDateStr(item.date)}</TableCell>
-                        <TableCell className="font-medium">{item.staffName}</TableCell>
-                        <TableCell className="text-right font-medium">
-                          {formatCurrency(item.amount)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={item.type === "addon" ? "success" : "destructive"}>
-                            {item.type === "addon" ? "Add On" : "Deduction"}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+            {/* Per-Staff Breakdown */}
+            {report.staffEntries && report.staffEntries.length > 0 && (
+              <div className="border-t border-zinc-200 dark:border-zinc-800">
+                <div className="px-3 sm:px-5 py-2 bg-zinc-50/50 dark:bg-zinc-900/30 border-b border-zinc-200 dark:border-zinc-800">
+                  <p className="text-xs font-semibold text-violet-600 uppercase tracking-wider flex items-center gap-1.5">
+                    <User className="h-3.5 w-3.5" />
+                    Staff Breakdown {hasMultipleStaff && `(${report.staffEntries.length} staff)`}
+                  </p>
+                </div>
+
+                <div className="p-3 sm:p-4 space-y-3">
+                  {report.staffEntries.map((entry, idx) => (
+                    <StaffEntrySection key={idx} entry={entry} showName={hasMultipleStaff || report.staffEntries!.length === 1} />
+                  ))}
+                </div>
               </div>
-            ) : selectedCategory ? (
-              <p className="text-sm text-zinc-500 text-center py-4">
-                No results. Click Search to query.
-              </p>
-            ) : (
-              <p className="text-sm text-zinc-500 text-center py-4">
-                Select a category and click Search to view details.
-              </p>
             )}
           </CardContent>
-        </Card>
-      </motion.div>
+        )}
+      </Card>
+    </motion.div>
+  );
+}
 
-      {/* Empty Reconciliation Report */}
-      {data?.emptyReconciliationSummary && data.emptyReconciliationSummary.length > 0 && (
-        <motion.div variants={fadeUpItem} initial="hidden" animate="show">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Empty Cylinder Reconciliation</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Cylinder Size</TableHead>
-                      <TableHead className="text-right">Total Issued</TableHead>
-                      <TableHead className="text-right">Expected Empties</TableHead>
-                      <TableHead className="text-right">Total Returned</TableHead>
-                      <TableHead className="text-right">Total Mismatch</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.emptyReconciliationSummary.map((item) => (
-                      <TableRow
-                        key={item.cylinderSize}
-                        className={item.mismatch !== 0 ? "bg-red-50/50 dark:bg-red-900/10" : ""}
-                      >
-                        <TableCell className="font-medium">{item.cylinderSize}</TableCell>
-                        <TableCell className="text-right">{item.issued}</TableCell>
-                        <TableCell className="text-right">{item.expected}</TableCell>
-                        <TableCell className="text-right">{item.returned}</TableCell>
-                        <TableCell className="text-right">
-                          <Badge variant={item.mismatch !== 0 ? "destructive" : "success"}>
-                            {item.mismatch}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+// ─── Staff Entry Section ───
+
+function StaffEntrySection({
+  entry,
+  showName,
+}: {
+  entry: StaffEntry;
+  showName: boolean;
+}) {
+  const totalCylinders = entry.items.reduce((s, i) => s + i.quantity, 0);
+  const aggAddOns = aggregateByCategory(entry.addOns);
+  const aggDeductions = aggregateByCategory(entry.deductions);
+
+  return (
+    <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+      {/* Staff Name Header */}
+      {showName && (
+        <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 bg-violet-50/60 dark:bg-violet-950/20 border-b border-zinc-200 dark:border-zinc-800">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400">
+              <User className="h-3.5 w-3.5" />
+            </div>
+            <span className="font-semibold text-sm sm:text-base">{entry.staffName}</span>
+          </div>
+          <Badge variant="outline" className="text-xs">
+            {totalCylinders} cyl
+          </Badge>
+        </div>
       )}
 
-      {/* Cylinder Distribution */}
-      <motion.div variants={fadeUpItem} initial="hidden" animate="show">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Cylinder Distribution</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {data?.cylinderBreakdown && data.cylinderBreakdown.length > 0 ? (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                {data.cylinderBreakdown.map((cyl) => {
-                  const maxQty = Math.max(
-                    ...data.cylinderBreakdown.map((c) => c.totalQuantity),
-                    1
-                  );
-                  const pct = (cyl.totalQuantity / maxQty) * 100;
+      {/* Staff details in a responsive grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-zinc-200 dark:divide-zinc-800">
+        {/* Cylinder Sales */}
+        <div className="p-3 sm:p-3.5 space-y-1">
+          <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1">Cylinders</p>
+          {entry.items.map((item, i) => (
+            <div key={i} className="flex justify-between text-xs sm:text-sm">
+              <span className="text-zinc-500 tabular-nums">
+                {item.quantity} &times; {formatNum(item.pricePerUnit)}
+              </span>
+              <span className="font-medium tabular-nums">{formatNum(item.total)}</span>
+            </div>
+          ))}
+          {aggAddOns.length > 0 && (
+            <>
+              <div className="border-b border-dashed border-zinc-200 dark:border-zinc-700 my-1" />
+              {aggAddOns.map((a, i) => (
+                <div key={i} className="flex justify-between text-xs sm:text-sm">
+                  <span className="text-blue-600 truncate mr-1">{a.category}</span>
+                  <span className="font-medium text-blue-600 tabular-nums">{formatNum(a.amount)}</span>
+                </div>
+              ))}
+            </>
+          )}
+          {aggDeductions.length > 0 && (
+            <>
+              <div className="border-b border-dashed border-zinc-200 dark:border-zinc-700 my-1" />
+              {aggDeductions.map((d, i) => (
+                <div key={i} className="flex justify-between text-xs sm:text-sm">
+                  <span className="text-red-600 truncate mr-1">{d.category}</span>
+                  <span className="font-medium text-red-600 tabular-nums">{formatNum(d.amount)}</span>
+                </div>
+              ))}
+            </>
+          )}
+          <div className="border-t border-zinc-200 dark:border-zinc-700 pt-1 mt-1">
+            <div className="flex justify-between text-xs sm:text-sm font-bold">
+              <span>Expected</span>
+              <span className="tabular-nums">{formatCurrency(entry.amountExpected)}</span>
+            </div>
+          </div>
+        </div>
 
-                  return (
-                    <div
-                      key={cyl.cylinderSize}
-                      className="rounded-lg border border-zinc-100 dark:border-zinc-800 p-4"
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                          {cyl.cylinderSize}
-                        </p>
-                        <Badge variant="outline">{cyl.totalQuantity} qty</Badge>
-                      </div>
-                      <div className="w-full bg-zinc-100 dark:bg-zinc-800 rounded-full h-2 mb-2">
-                        <div
-                          className="bg-blue-500 h-2 rounded-full transition-all duration-500"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                      <p className="text-sm font-medium text-emerald-600">
-                        {formatCurrency(cyl.totalRevenue)}
-                      </p>
-                    </div>
-                  );
-                })}
+        {/* Denominations */}
+        <div className="p-3 sm:p-3.5 space-y-1">
+          <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+            <Banknote className="h-3 w-3" />
+            Cash Denominations
+          </p>
+          {entry.denominations.length > 0 ? (
+            <>
+              {/* Denomination table header */}
+              <div className="flex justify-between text-[10px] text-zinc-400 uppercase tracking-wider pb-0.5 border-b border-zinc-100 dark:border-zinc-800">
+                <span className="w-12">Note</span>
+                <span className="w-10 text-center">&times;</span>
+                <span className="text-right flex-1">Total</span>
               </div>
-            ) : (
-              <p className="text-sm text-zinc-500 text-center py-8">
-                No cylinder data for the selected period.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </motion.div>
+              {entry.denominations
+                .filter((d) => d.count > 0)
+                .sort((a, b) => b.note - a.note)
+                .map((d, i) => (
+                  <div key={i} className="flex justify-between text-xs sm:text-sm">
+                    <span className="text-zinc-500 w-12 tabular-nums">{formatNum(d.note)}</span>
+                    <span className="text-zinc-400 w-10 text-center tabular-nums">{d.count}</span>
+                    <span className="font-medium tabular-nums text-right flex-1">{formatNum(d.total)}</span>
+                  </div>
+                ))}
+              <div className="border-t border-zinc-200 dark:border-zinc-700 pt-1 mt-1">
+                <div className="flex justify-between text-xs sm:text-sm font-bold">
+                  <span>Cash Total</span>
+                  <span className="tabular-nums text-emerald-600">
+                    {formatCurrency(entry.denominationTotal)}
+                  </span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-zinc-400 italic">No denominations</p>
+          )}
+        </div>
 
-      {/* Daily Trends */}
-      <motion.div variants={fadeUpItem} initial="hidden" animate="show">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Daily Trends</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {data?.dailyTrends && data.dailyTrends.length > 0 ? (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead className="text-right">Revenue</TableHead>
-                      <TableHead className="text-right">Deliveries</TableHead>
-                      <TableHead className="text-right">Settlements</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.dailyTrends.map((day) => (
-                      <TableRow key={day.date}>
-                        <TableCell className="font-medium">
-                          {formatDateStr(day.date)}
-                        </TableCell>
-                        <TableCell className="text-right text-emerald-600 font-medium">
-                          {formatCurrency(day.revenue)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {day.deliveries}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Badge variant="secondary">{day.settlements}</Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <p className="text-sm text-zinc-500 text-center py-8">
-                No daily data for the selected period.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </motion.div>
+        {/* Summary */}
+        <div className="p-3 sm:p-3.5 space-y-1.5">
+          <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1">Summary</p>
+          <div className="flex justify-between text-xs sm:text-sm">
+            <span className="text-zinc-500">Gross Revenue</span>
+            <span className="font-medium tabular-nums">{formatCurrency(entry.grossRevenue)}</span>
+          </div>
+          {entry.totalAddOns > 0 && (
+            <div className="flex justify-between text-xs sm:text-sm">
+              <span className="text-blue-600">+ Add Ons</span>
+              <span className="font-medium text-blue-600 tabular-nums">{formatCurrency(entry.totalAddOns)}</span>
+            </div>
+          )}
+          {entry.totalDeductions > 0 && (
+            <div className="flex justify-between text-xs sm:text-sm">
+              <span className="text-red-600">- Deductions</span>
+              <span className="font-medium text-red-600 tabular-nums">{formatCurrency(entry.totalDeductions)}</span>
+            </div>
+          )}
+          <div className="border-t border-zinc-200 dark:border-zinc-700 pt-1">
+            <div className="flex justify-between text-xs sm:text-sm font-bold">
+              <span>Expected</span>
+              <span className="tabular-nums">{formatCurrency(entry.amountExpected)}</span>
+            </div>
+          </div>
+          <div className="flex justify-between text-xs sm:text-sm">
+            <span className="text-zinc-500">Cash Received</span>
+            <span className="font-medium tabular-nums text-emerald-600">
+              {formatCurrency(entry.denominationTotal)}
+            </span>
+          </div>
+          {entry.cashDifference !== 0 && (
+            <div className="flex justify-between text-xs sm:text-sm">
+              <span className={entry.cashDifference > 0 ? "text-red-600" : "text-emerald-600"}>
+                {entry.cashDifference > 0 ? "Shortage" : "Excess"}
+              </span>
+              <span
+                className={`font-bold tabular-nums ${
+                  entry.cashDifference > 0 ? "text-red-600" : "text-emerald-600"
+                }`}
+              >
+                {formatCurrency(Math.abs(entry.cashDifference))}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
